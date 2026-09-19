@@ -412,7 +412,7 @@ function handleFrame(frame) {
       markNode(frame.node, frame.state);
       break;
     case 'token':
-      appendToken(frame.source, frame.text);
+      appendToken(frame.source, frame.text, frame.t);
       break;
     case 'output':
       logOutput(frame.source, frame.text, frame.t);
@@ -446,14 +446,24 @@ function stopRun() {
   hideApproval();
 }
 
-/* ── console ──────────────────────────────────────────────────── */
+/* ── console ─────────────────────────────────────────────────── */
 
-let tokenLine = null;
+/**
+ * The open streaming block, or null.
+ *
+ * Agents stream: every delta arrives as its own frame. Rendering one row per
+ * frame gave a hundred timestamped lines for a single paragraph once a real
+ * model was answering - offline the same text arrived in about a dozen chunks,
+ * which is why it looked fine. Consecutive frames of the same kind from the
+ * same source now grow one block, so a reply reads as a reply and still
+ * types itself out live.
+ */
+let block = null;
 
 function resetConsole() {
   const box = $('console');
   box.innerHTML = '';
-  tokenLine = null;
+  block = null;
   $('runState').textContent = 'idle';
   box.appendChild(el('p', 'console-empty',
     'Press Run pattern to stream this workflow\'s events.'));
@@ -466,41 +476,44 @@ function consoleBox() {
   return box;
 }
 
+function stamp(t) {
+  return t !== undefined ? t.toFixed(1) + 's' : '';
+}
+
+/** A discrete event: always its own row, and it closes any open block. */
 function logLine(level, source, message, t) {
   const box = consoleBox();
-  tokenLine = null;
+  block = null;
   const line = el('div', `line line-${level}`);
-  line.appendChild(el('span', 't', t !== undefined ? t.toFixed(1) + 's' : ''));
+  line.appendChild(el('span', 't', stamp(t)));
   line.appendChild(el('span', 'src', source));
   line.appendChild(el('span', 'msg', message));
   box.appendChild(line);
   box.scrollTop = box.scrollHeight;
 }
 
-function logOutput(source, text, t) {
+/** Streamed text: appends to the open block, or starts one. */
+function appendStream(kind, source, text, t) {
   const box = consoleBox();
-  tokenLine = null;
-  const line = el('div', 'line line-output');
-  line.appendChild(el('span', 't', t !== undefined ? t.toFixed(1) + 's' : ''));
-  line.appendChild(el('span', 'src', source));
-  line.appendChild(el('span', 'msg', text));
-  box.appendChild(line);
+  if (!block || block.kind !== kind || block.source !== source) {
+    const line = el('div', `line line-${kind}`);
+    line.appendChild(el('span', 't', stamp(t)));   // when this block started
+    line.appendChild(el('span', 'src', source));
+    const msg = el('span', 'msg', '');
+    line.appendChild(msg);
+    box.appendChild(line);
+    block = { kind, source, msg };
+  }
+  block.msg.textContent += text;
   box.scrollTop = box.scrollHeight;
 }
 
-/** Streamed tokens coalesce into one growing line, the way a chat UI would. */
-function appendToken(source, text) {
-  const box = consoleBox();
-  if (!tokenLine || tokenLine.dataset.src !== source) {
-    tokenLine = el('div', 'line line-token');
-    tokenLine.dataset.src = source;
-    tokenLine.appendChild(el('span', 't', ''));
-    tokenLine.appendChild(el('span', 'src', source));
-    tokenLine.appendChild(el('span', 'msg', ''));
-    box.appendChild(tokenLine);
-  }
-  tokenLine.querySelector('.msg').textContent += text;
-  box.scrollTop = box.scrollHeight;
+function logOutput(source, text, t) {
+  appendStream('output', source, text, t);
+}
+
+function appendToken(source, text, t) {
+  appendStream('token', source, text, t);
 }
 
 /* ── approval modal ───────────────────────────────────────────── */
