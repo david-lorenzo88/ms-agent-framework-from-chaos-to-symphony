@@ -47,7 +47,10 @@ def build():
         client=chat_client("writer-agent"),
         name="writer-agent",
         description="Writes the letter once the figure is approved.",
-        instructions="Write the customer letter conveying the approved settlement. Do not restate the internal reasoning.",
+        instructions=(
+            "Write the customer letter conveying the approved settlement. "
+            "Do not restate the internal reasoning."
+        ),
     )
 
     return (

@@ -26,7 +26,6 @@ from agent_framework import (
     executor,
 )
 from pydantic import BaseModel
-from typing_extensions import Never
 
 from ..base import DiagramEdge, DiagramNode, PatternSpec
 from ..clients import chat_client

@@ -20,7 +20,7 @@ import asyncio
 from collections.abc import Mapping, Sequence
 from typing import Any
 
-from agent_framework import Agent, ChatResponse, Message, ResponseStream, ChatResponseUpdate
+from agent_framework import Agent, ChatResponse, ChatResponseUpdate, Message
 from agent_framework.orchestrations import GroupChatBuilder, GroupChatState
 
 from ..base import DiagramEdge, DiagramNode, PatternSpec

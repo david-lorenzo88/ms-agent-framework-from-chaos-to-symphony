@@ -33,3 +33,8 @@ target-version = "py310"
 
 [tool.ruff.lint]
 select = ["E", "F", "I", "UP", "B"]
+
+[tool.ruff.lint.per-file-ignores]
+# deck/content.py is prose, not code: the slide bullets are data and reflowing
+# them at 120 columns makes the deck harder to edit, not easier.
+"deck/content.py" = ["E501"]
