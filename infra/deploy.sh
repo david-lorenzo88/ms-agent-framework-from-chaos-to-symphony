@@ -38,7 +38,24 @@ MAX_REPLICAS="${MAX_REPLICAS:-3}"
 
 # Offline by default: no keys, no model spend, and a public URL nobody can run
 # up a bill on. See the README before changing this on a public app.
+#
+# To run against a real model:
+#   CHAOS_PROVIDER=azure \
+#   AZURE_OPENAI_ENDPOINT=https://<resource>.openai.azure.com/ \
+#   AZURE_OPENAI_DEPLOYMENT=gpt-4o-mini \
+#   AZURE_OPENAI_API_KEY=<key> ./infra/deploy.sh
 CHAOS_PROVIDER="${CHAOS_PROVIDER:-offline}"
+AZURE_OPENAI_ENDPOINT="${AZURE_OPENAI_ENDPOINT:-}"
+AZURE_OPENAI_DEPLOYMENT="${AZURE_OPENAI_DEPLOYMENT:-}"
+AZURE_OPENAI_API_KEY="${AZURE_OPENAI_API_KEY:-}"
+OPENAI_API_KEY="${OPENAI_API_KEY:-}"
+
+if [ "$CHAOS_PROVIDER" != "offline" ]; then
+  echo "WARNING: this app has no authentication. A public URL running a real"
+  echo "         model can be used by anyone who finds it, at your expense."
+  echo "         See 'Before you make it public' in the README."
+  echo
+fi
 
 command -v az >/dev/null || { echo "Azure CLI not found: https://aka.ms/azure-cli"; exit 1; }
 az account show >/dev/null 2>&1 || { echo "Not logged in. Run: az login"; exit 1; }
@@ -145,6 +162,19 @@ ENV_VARS=(
   "SHOWCASE_PORT=8000"
   "DEVUI_PORT=8080"
 )
+# Only pass provider settings that were actually supplied, so an offline
+# deploy does not plant empty variables on the app.
+[ -n "$AZURE_OPENAI_ENDPOINT" ]   && ENV_VARS+=("AZURE_OPENAI_ENDPOINT=$AZURE_OPENAI_ENDPOINT")
+[ -n "$AZURE_OPENAI_DEPLOYMENT" ] && ENV_VARS+=("AZURE_OPENAI_DEPLOYMENT=$AZURE_OPENAI_DEPLOYMENT")
+[ -n "$AZURE_OPENAI_API_KEY" ]    && ENV_VARS+=("AZURE_OPENAI_API_KEY=secretref:azure-openai-key")
+[ -n "$OPENAI_API_KEY" ]          && ENV_VARS+=("OPENAI_API_KEY=secretref:openai-key")
+true  # keep the exit status clean when the last test above is false
+
+# API keys go in as Container Apps secrets, never as plain environment values -
+# a plain value is readable by anyone with reader access to the app.
+SECRETS=()
+[ -n "$AZURE_OPENAI_API_KEY" ] && SECRETS+=("azure-openai-key=$AZURE_OPENAI_API_KEY")
+[ -n "$OPENAI_API_KEY" ]       && SECRETS+=("openai-key=$OPENAI_API_KEY")
 
 echo
 if az containerapp show --name "$APP_NAME" --resource-group "$RESOURCE_GROUP" \
@@ -155,6 +185,10 @@ if az containerapp show --name "$APP_NAME" --resource-group "$RESOURCE_GROUP" \
   az containerapp registry set --name "$APP_NAME" --resource-group "$RESOURCE_GROUP" \
      --server "${ACR_NAME}.azurecr.io" --username "$ACR_USER" --password "$ACR_PASS" \
      --only-show-errors -o none
+  if [ ${#SECRETS[@]} -gt 0 ]; then
+    az containerapp secret set --name "$APP_NAME" --resource-group "$RESOURCE_GROUP" \
+       --secrets "${SECRETS[@]}" --only-show-errors -o none
+  fi
   az containerapp update --name "$APP_NAME" --resource-group "$RESOURCE_GROUP" \
      --image "$IMAGE" \
      --cpu "$CPU" --memory "$MEMORY" \
@@ -169,6 +203,7 @@ else
      --target-port 8000 --ingress external \
      --registry-server "${ACR_NAME}.azurecr.io" \
      --registry-username "$ACR_USER" --registry-password "$ACR_PASS" \
+     ${SECRETS[@]+--secrets "${SECRETS[@]}"} \
      --cpu "$CPU" --memory "$MEMORY" \
      --min-replicas "$MIN_REPLICAS" --max-replicas "$MAX_REPLICAS" \
      --env-vars "${ENV_VARS[@]}" \

@@ -22,7 +22,13 @@ WORKDIR /app
 # Dependencies first, so editing the app does not re-resolve the whole tree.
 COPY pyproject.toml README.md ./
 COPY src/ ./src/
-RUN pip install --no-cache-dir .
+
+# Include the OpenAI provider (which also serves Azure OpenAI) so the deployed
+# app can be switched to a real model with an environment variable instead of
+# a rebuild. It adds a few MB and is inert unless CHAOS_PROVIDER says otherwise
+# - without it, setting CHAOS_PROVIDER=azure silently runs scripted.
+ARG INSTALL_EXTRAS=".[openai]"
+RUN pip install --no-cache-dir "${INSTALL_EXTRAS}"
 
 COPY web/ ./web/
 COPY scripts/ ./scripts/

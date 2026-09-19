@@ -42,8 +42,21 @@ async function boot() {
   state.tiers = data.tiers;
 
   const pill = $('providerPill');
-  pill.textContent = data.offline ? 'offline · no keys needed' : `live · ${data.provider}`;
-  pill.classList.add(data.offline ? 'pill-offline' : 'pill-live');
+  if (data.providerNote) {
+    // A live provider was asked for and is not actually available. Say so
+    // rather than letting the badge claim a model that is not being called.
+    pill.textContent = `${data.requestedProvider} unavailable · offline`;
+    pill.classList.add('pill-warn');
+    pill.title = data.providerNote;
+  } else if (data.offline) {
+    pill.textContent = 'offline · no keys needed';
+    pill.classList.add('pill-offline');
+    pill.title = 'Agents run against a deterministic scripted client. No model is called.';
+  } else {
+    pill.textContent = `live · ${data.provider}`;
+    pill.classList.add('pill-live');
+    pill.title = 'Agents are calling a real model.';
+  }
 
   $('devuiLink').href = data.devuiUrl;
   $('devuiOpen').href = data.devuiUrl;

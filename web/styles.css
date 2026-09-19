@@ -78,6 +78,7 @@ code { font-family: var(--mono); font-size: .88em; }
 }
 .pill-offline { background: var(--amber); color: var(--navy-deep); }
 .pill-live    { background: var(--mint);  color: #0C3B1B; }
+.pill-warn    { background: var(--red);   color: #fff; }
 .pill-link { text-decoration: none; border: 1px solid rgba(255,255,255,.3); }
 .pill-link:hover { background: rgba(255,255,255,.22); }
 

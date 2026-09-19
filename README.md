@@ -321,17 +321,46 @@ MIN_REPLICAS=0 ./infra/deploy.sh
 az group delete -n rg-chaos-to-symphony --yes --no-wait
 ```
 
-### Providers
+### Providers, and what "offline" actually means
 
 `CHAOS_PROVIDER` takes `offline` (default), `openai`, `azure` or `foundry`.
-Azure OpenAI is reached by giving `OpenAIChatClient` an `azure_endpoint` —
-there is no `AzureOpenAIChatClient` in Agent Framework. The provider packages
-are extras, so the default image does not carry them:
+
+**Offline is not a mock of the framework.** The orchestration is entirely real:
+real `SequentialBuilder`, real handoff tool calls, real checkpointing, real
+OpenTelemetry spans. What is scripted is the *model* — `ScriptedChatClient`
+implements the same `BaseChatClient` contract a provider implements and derives
+its answers from the in-memory freight data.
+
+The consequence worth knowing before you present: on offline, the **decisions**
+are deterministic Python, not model reasoning. Which specialist a handoff routes
+to, when the group chat converges, what the Magentic progress ledger says — all
+computed from the shipment's own fields. The pattern mechanics are genuine; the
+judgement inside them is not. If your point is "watch the orchestration work",
+offline is honest and repeatable. If your point is "watch the *agent decide*",
+run it live.
+
+To run live, supply the settings and the deploy script does the rest — the key
+goes in as a Container Apps secret, never a plain environment value:
 
 ```bash
-pip install '.[openai]'    # OpenAI and Azure OpenAI
+CHAOS_PROVIDER=azure \
+AZURE_OPENAI_ENDPOINT=https://<resource>.openai.azure.com/ \
+AZURE_OPENAI_DEPLOYMENT=gpt-4o-mini \
+AZURE_OPENAI_API_KEY=<key> ./infra/deploy.sh
+```
+
+Azure OpenAI is reached by giving `OpenAIChatClient` an `azure_endpoint` — there
+is no `AzureOpenAIChatClient` in Agent Framework. The image ships the `openai`
+extra so this is an environment-variable change rather than a rebuild;
+`foundry` is a separate extra:
+
+```bash
 pip install '.[foundry]'   # Foundry Agent Service
 ```
+
+The badge in the header reports the provider **actually in use**, not the one
+configured. Ask for a provider that is not available and it turns red and says
+so, rather than claiming a live model while every agent runs scripted.
 
 ---
 

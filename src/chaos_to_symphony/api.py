@@ -27,7 +27,7 @@ from fastapi.staticfiles import StaticFiles
 from pydantic import BaseModel
 
 from . import __version__, telemetry
-from .clients import is_offline, provider
+from .clients import effective, provider
 from .memory import STORE
 from .registry import PATTERNS, TIERS, get
 from .runner import RunSession, execute
@@ -84,7 +84,11 @@ async def lifespan(app: FastAPI):
     print("  From Chaos to Symphony - Baltic Summit 2026")
     print(f"  Showcase: http://localhost:{os.getenv('SHOWCASE_PORT', '8000')}")
     print(f"  DevUI:    {DEVUI_URL}  (start it with: python -m chaos_to_symphony.devui_app)")
-    print(f"  Provider: {provider()}" + ("  (offline - no keys, no network)" if is_offline() else ""))
+    status = effective()
+    print(f"  Provider: {status['active']} via {status['client']}"
+          + ("  (no keys, no network)" if not status["live"] else ""))
+    if status["note"]:
+        print(f"  WARNING:  {status['note']}")
     print(f"  Traces:   {'OpenTelemetry capture on' if traced else 'unavailable'}")
     print(f"  Site:     {WEB_DIR if WEB_DIR else 'NOT FOUND - set CHAOS_WEB_DIR'}")
     print()
@@ -114,10 +118,15 @@ class ApprovalRequest(BaseModel):
 @app.get("/api/patterns")
 async def patterns() -> dict[str, Any]:
     """Everything the site needs to render the catalogue."""
+    status = effective()
     return {
         "version": __version__,
-        "provider": provider(),
-        "offline": is_offline(),
+        # What is actually in use, so the UI cannot advertise a live model that
+        # silently fell back to the scripted client.
+        "provider": status["active"],
+        "requestedProvider": status["requested"],
+        "offline": not status["live"],
+        "providerNote": status["note"],
         "devuiUrl": PUBLIC_DEVUI_URL,
         "tiers": [{"id": t[0], "title": t[1], "blurb": t[2]} for t in TIERS],
         "patterns": [spec.to_dict() for spec in PATTERNS],
@@ -257,7 +266,8 @@ async def health() -> dict[str, Any]:
     return {
         "status": "ok",
         "version": __version__,
-        "provider": provider(),
+        "provider": effective()["active"],
+        "requestedProvider": provider(),
         "patterns": len(PATTERNS),
         "proxyDevui": PROXY_DEVUI,
     }

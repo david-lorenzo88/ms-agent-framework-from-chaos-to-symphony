@@ -32,6 +32,42 @@ def _warn_once(message: str) -> None:
     logging.getLogger(__name__).warning(message)
 
 
+@lru_cache(maxsize=1)
+def effective() -> dict[str, Any]:
+    """What the app will *actually* use, not what was asked for.
+
+    Reporting the configured provider is not the same thing: select ``azure``
+    in an image built without the provider extra and every agent quietly runs
+    scripted while the badge claims a live model. Constructing a client costs
+    nothing here - no provider is contacted until a request is made - so the
+    honest answer is simply to build one and look at what came back.
+    """
+    requested = provider()
+    try:
+        client = chat_client("probe")
+        name = type(client).__name__
+    except Exception as exc:  # pragma: no cover - defensive
+        return {
+            "requested": requested, "active": "offline", "live": False,
+            "note": f"Could not construct a client ({type(exc).__name__}); running offline.",
+        }
+
+    live = name != "ScriptedChatClient"
+    note = ""
+    if requested != "offline" and not live:
+        note = (
+            f"'{requested}' was requested but is not available, so the offline client is in use. "
+            "Install the provider extra and set its endpoint/key."
+        )
+    return {
+        "requested": requested,
+        "active": requested if live else "offline",
+        "live": live,
+        "client": name,
+        "note": note,
+    }
+
+
 def chat_client(persona: str = "agent", *, tool_budget: int = 1) -> Any:
     """Return a chat client for one agent persona.
 
