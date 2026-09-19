@@ -362,6 +362,19 @@ extra so this is an environment-variable change rather than a rebuild;
 pip install '.[foundry]'   # Foundry Agent Service
 ```
 
+Check a provider before running twelve patterns against it:
+
+```bash
+make check
+```
+
+One minimal request, then a plain answer. If it fails with **`API version not
+supported`** it walks the known Azure API versions and tells you which one your
+resource accepts, to put in `AZURE_OPENAI_API_VERSION`. The version is
+otherwise left unset deliberately — pinning one here overrides the framework's
+own default and goes stale, which is exactly how `2024-10-21` ended up being
+rejected by a current resource.
+
 The badge in the header reports the provider **actually in use**, not the one
 configured. Ask for a provider that is not available and it turns red and says
 so, rather than claiming a live model while every agent runs scripted.

@@ -88,12 +88,17 @@ def chat_client(persona: str = "agent", *, tool_budget: int = 1) -> Any:
             try:
                 from agent_framework.openai import OpenAIChatClient
 
-                return OpenAIChatClient(
-                    model=deployment,
-                    azure_endpoint=endpoint,
-                    api_key=os.getenv("AZURE_OPENAI_API_KEY"),
-                    api_version=os.getenv("AZURE_OPENAI_API_VERSION", "2024-10-21"),
-                )
+                # Pass only what was actually configured. Pinning an api_version
+                # here overrides the framework's own default, and a hard-coded
+                # one goes stale: "2024-10-21" is rejected outright by newer
+                # resources with "API version not supported". Set
+                # AZURE_OPENAI_API_VERSION to pin it deliberately.
+                options: dict[str, Any] = {"model": deployment, "azure_endpoint": endpoint}
+                if os.getenv("AZURE_OPENAI_API_KEY"):
+                    options["api_key"] = os.getenv("AZURE_OPENAI_API_KEY")
+                if os.getenv("AZURE_OPENAI_API_VERSION"):
+                    options["api_version"] = os.getenv("AZURE_OPENAI_API_VERSION")
+                return OpenAIChatClient(**options)
             except ImportError:
                 _warn_once("agent-framework-openai is not installed; using the offline client. pip install '.[openai]'")
             except Exception as exc:  # pragma: no cover - configuration dependent

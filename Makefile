@@ -1,5 +1,5 @@
 # From Chaos to Symphony - Baltic Summit 2026
-.PHONY: help install demo devui web smoke drive deck deck-qa deploy lint clean
+.PHONY: help install demo devui web smoke drive check deck deck-qa deploy lint clean
 
 PY := .venv/bin/python
 
@@ -9,6 +9,7 @@ help:
 	@echo "make devui     DevUI only"
 	@echo "make web       showcase site only"
 	@echo "make smoke     run all twelve patterns end to end"
+	@echo "make check     make one real call with the configured provider"
 	@echo "make drive     drive all twelve through the browser UI (needs make demo running)"
 	@echo "make deck      rebuild the session deck from deck/content.py"
 	@echo "make deck-qa   check the deck's text fits its boxes"
@@ -42,6 +43,9 @@ web:
 
 smoke:
 	$(PY) scripts/smoke.py
+
+check:
+	$(PY) scripts/check_provider.py
 
 # Needs both servers up in another terminal, plus:
 #   .venv/bin/pip install playwright && .venv/bin/playwright install chromium
