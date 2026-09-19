@@ -22,7 +22,7 @@ from typing import Any
 import httpx
 from dotenv import load_dotenv
 from fastapi import FastAPI, HTTPException, Request
-from fastapi.responses import FileResponse, StreamingResponse
+from fastapi.responses import FileResponse, JSONResponse, StreamingResponse
 from fastapi.staticfiles import StaticFiles
 from pydantic import BaseModel
 
@@ -35,7 +35,31 @@ from .runner import RunSession, execute
 load_dotenv()
 
 logger = logging.getLogger(__name__)
-WEB_DIR = Path(__file__).resolve().parent.parent.parent / "web"
+def _find_web_dir() -> Path | None:
+    """Locate the static site.
+
+    The obvious ``__file__ / .. / .. / .. / web`` only holds for an editable
+    install run from the repository root. Pip-installed - which is how the
+    container runs - that resolves inside site-packages, the directory does not
+    exist, and every static route silently fails to register: the app boots
+    happily and answers "Not Found" at /.
+    """
+    candidates: list[Path] = []
+    override = os.getenv("CHAOS_WEB_DIR")
+    if override:
+        candidates.append(Path(override))
+    candidates += [
+        Path(__file__).resolve().parent.parent.parent / "web",  # editable, from the repo
+        Path("/app/web"),                                       # the container image
+        Path.cwd() / "web",                                     # run from the repo root
+    ]
+    for candidate in candidates:
+        if (candidate / "index.html").is_file():
+            return candidate
+    return None
+
+
+WEB_DIR = _find_web_dir()
 DEVUI_URL = os.getenv("DEVUI_URL", f"http://localhost:{os.getenv('DEVUI_PORT', '8080')}")
 
 #: When both processes share one container - which is how this deploys - the
@@ -62,6 +86,7 @@ async def lifespan(app: FastAPI):
     print(f"  DevUI:    {DEVUI_URL}  (start it with: python -m chaos_to_symphony.devui_app)")
     print(f"  Provider: {provider()}" + ("  (offline - no keys, no network)" if is_offline() else ""))
     print(f"  Traces:   {'OpenTelemetry capture on' if traced else 'unavailable'}")
+    print(f"  Site:     {WEB_DIR if WEB_DIR else 'NOT FOUND - set CHAOS_WEB_DIR'}")
     print()
     yield
     for session in list(SESSIONS.values()):
@@ -328,7 +353,7 @@ if PROXY_DEVUI:
 # Static site
 # --------------------------------------------------------------------------
 
-if WEB_DIR.is_dir():
+if WEB_DIR is not None:
     app.mount("/assets", StaticFiles(directory=WEB_DIR / "assets"), name="assets")
 
     @app.get("/")
@@ -341,6 +366,28 @@ if WEB_DIR.is_dir():
         if candidate.is_file() and WEB_DIR.resolve() in candidate.parents:
             return FileResponse(candidate)
         raise HTTPException(status_code=404, detail="Not found")
+
+else:
+    # Fail loudly. A bare 404 at / sent the last deploy on a detour; say what
+    # is actually wrong and where it looked.
+    logger.error("Static site not found. Set CHAOS_WEB_DIR to the directory holding index.html.")
+
+    @app.get("/")
+    async def missing_site() -> JSONResponse:
+        return JSONResponse(
+            status_code=500,
+            content={
+                "error": "The static site was not found, so the UI is not being served.",
+                "fix": "Set CHAOS_WEB_DIR to the directory containing index.html.",
+                "looked_in": [
+                    os.getenv("CHAOS_WEB_DIR") or "(CHAOS_WEB_DIR unset)",
+                    str(Path(__file__).resolve().parent.parent.parent / "web"),
+                    "/app/web",
+                    str(Path.cwd() / "web"),
+                ],
+                "api": "The JSON API under /api is unaffected and still works.",
+            },
+        )
 
 
 def main() -> None:

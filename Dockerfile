@@ -13,7 +13,9 @@ ENV PYTHONUNBUFFERED=1 \
     # Single origin: the browser only ever sees port 8000.
     CHAOS_PROXY_DEVUI=1 \
     # No keys, no network, no cost. Override only with the provider extras built in.
-    CHAOS_PROVIDER=offline
+    CHAOS_PROVIDER=offline \
+    # The package is pip-installed, so the site does not sit next to the module.
+    CHAOS_WEB_DIR=/app/web
 
 WORKDIR /app
 
