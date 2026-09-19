@@ -21,7 +21,7 @@ from typing import Any
 
 import httpx
 from dotenv import load_dotenv
-from fastapi import FastAPI, HTTPException
+from fastapi import FastAPI, HTTPException, Request
 from fastapi.responses import FileResponse, StreamingResponse
 from fastapi.staticfiles import StaticFiles
 from pydantic import BaseModel
@@ -37,6 +37,16 @@ load_dotenv()
 logger = logging.getLogger(__name__)
 WEB_DIR = Path(__file__).resolve().parent.parent.parent / "web"
 DEVUI_URL = os.getenv("DEVUI_URL", f"http://localhost:{os.getenv('DEVUI_PORT', '8080')}")
+
+#: When both processes share one container - which is how this deploys - the
+#: browser can only reach the public ingress. DevUI is then proxied through
+#: this app instead of being exposed on its own port: the SPA at /devui/ and
+#: its API at /v1/, which works because DevUI's frontend asks for both with
+#: relative URLs and this app owns nothing under either path.
+PROXY_DEVUI = os.getenv("CHAOS_PROXY_DEVUI", "0") == "1"
+#: What the browser should use as the DevUI origin. Behind the proxy that is
+#: this app's own origin plus /devui; locally it is DevUI's own port.
+PUBLIC_DEVUI_URL = "/devui" if PROXY_DEVUI else DEVUI_URL
 
 #: Live runs, keyed by run id. In memory, like everything else here.
 SESSIONS: dict[str, RunSession] = {}
@@ -83,7 +93,7 @@ async def patterns() -> dict[str, Any]:
         "version": __version__,
         "provider": provider(),
         "offline": is_offline(),
-        "devuiUrl": DEVUI_URL,
+        "devuiUrl": PUBLIC_DEVUI_URL,
         "tiers": [{"id": t[0], "title": t[1], "blurb": t[2]} for t in TIERS],
         "patterns": [spec.to_dict() for spec in PATTERNS],
     }
@@ -109,10 +119,10 @@ async def devui_entities() -> dict[str, Any]:
             entity_id = by_name.get(spec.devui_name.lower())
             if entity_id:
                 mapping[spec.slug] = entity_id
-        return {"available": True, "devuiUrl": DEVUI_URL, "entities": mapping}
+        return {"available": True, "devuiUrl": PUBLIC_DEVUI_URL, "entities": mapping}
     except Exception as exc:
         logger.info("DevUI not reachable at %s (%s)", DEVUI_URL, exc)
-        return {"available": False, "devuiUrl": DEVUI_URL, "entities": {}, "reason": str(exc)[:200]}
+        return {"available": False, "devuiUrl": PUBLIC_DEVUI_URL, "entities": {}, "reason": str(exc)[:200]}
 
 
 @app.get("/api/audit")
@@ -214,6 +224,20 @@ async def approve(run_id: str, body: ApprovalRequest) -> dict[str, Any]:
     return {"ok": True, "decision": body.decision}
 
 
+@app.get("/api/health")
+async def health() -> dict[str, Any]:
+    """Liveness for the platform. Deliberately not /health - that path is
+    proxied to DevUI - and deliberately independent of DevUI, so a DevUI
+    problem cannot make the platform restart a working showcase."""
+    return {
+        "status": "ok",
+        "version": __version__,
+        "provider": provider(),
+        "patterns": len(PATTERNS),
+        "proxyDevui": PROXY_DEVUI,
+    }
+
+
 @app.get("/api/traces/{run_id}")
 async def traces(run_id: str) -> dict[str, Any]:
     """The OpenTelemetry spans for one run, for the Traces tab."""
@@ -228,6 +252,76 @@ async def reset() -> dict[str, str]:
     """Reset the in-memory store between demos."""
     STORE.reset()
     return {"status": "reset"}
+
+
+# --------------------------------------------------------------------------
+# DevUI reverse proxy (single-origin deployments)
+# --------------------------------------------------------------------------
+
+_PROXY_HOP_BY_HOP = {
+    "connection", "keep-alive", "transfer-encoding", "upgrade",
+    "proxy-authenticate", "proxy-authorization", "te", "trailers",
+    "content-encoding", "content-length",
+}
+
+
+async def _proxy(request: Request, target: str) -> StreamingResponse:
+    """Stream a request through to DevUI and stream the answer back.
+
+    Streaming rather than buffering is not optional here: DevUI's /v1/responses
+    is server-sent events, and a buffering proxy would hold the whole run and
+    deliver it in one lump after it finished.
+    """
+    client = httpx.AsyncClient(timeout=httpx.Timeout(600.0, connect=10.0))
+    headers = {k: v for k, v in request.headers.items() if k.lower() not in _PROXY_HOP_BY_HOP | {"host"}}
+    upstream = client.build_request(
+        request.method, target, headers=headers, content=request.stream(),
+        params=dict(request.query_params),
+    )
+    response = await client.send(upstream, stream=True)
+
+    async def body():
+        try:
+            async for chunk in response.aiter_raw():
+                yield chunk
+        finally:
+            await response.aclose()
+            await client.aclose()
+
+    return StreamingResponse(
+        body(),
+        status_code=response.status_code,
+        headers={k: v for k, v in response.headers.items() if k.lower() not in _PROXY_HOP_BY_HOP},
+        media_type=response.headers.get("content-type"),
+    )
+
+
+if PROXY_DEVUI:
+    _METHODS = ["GET", "POST", "PUT", "PATCH", "DELETE", "OPTIONS", "HEAD"]
+
+    @app.api_route("/devui", methods=_METHODS, include_in_schema=False)
+    @app.api_route("/devui/{path:path}", methods=_METHODS, include_in_schema=False)
+    async def proxy_devui_app(request: Request, path: str = "") -> StreamingResponse:
+        """The DevUI single-page app. Its assets are requested relatively, so
+        serving it from this subpath works without rebuilding the frontend."""
+        return await _proxy(request, f"{DEVUI_URL}/{path}")
+
+    @app.api_route("/v1/{path:path}", methods=_METHODS, include_in_schema=False)
+    async def proxy_devui_api(request: Request, path: str) -> StreamingResponse:
+        """DevUI's API. The SPA asks for this at the origin root, so it has to
+        live here rather than under /devui."""
+        return await _proxy(request, f"{DEVUI_URL}/v1/{path}")
+
+    # The SPA also probes these two at the root. Without them it renders, then
+    # reports "Can't Connect to Backend" - which looks like DevUI is down when
+    # in fact only the proxy was incomplete.
+    @app.api_route("/health", methods=_METHODS, include_in_schema=False)
+    async def proxy_devui_health(request: Request) -> StreamingResponse:
+        return await _proxy(request, f"{DEVUI_URL}/health")
+
+    @app.api_route("/meta", methods=_METHODS, include_in_schema=False)
+    async def proxy_devui_meta(request: Request) -> StreamingResponse:
+        return await _proxy(request, f"{DEVUI_URL}/meta")
 
 
 # --------------------------------------------------------------------------
@@ -255,7 +349,9 @@ def main() -> None:
 
     uvicorn.run(
         "chaos_to_symphony.api:app",
-        host="127.0.0.1",
+        # Loopback locally; a container has to bind every interface for the
+        # platform's ingress to reach it.
+        host=os.getenv("CHAOS_HOST", "127.0.0.1"),
         port=int(os.getenv("SHOWCASE_PORT", "8000")),
         log_level="info",
     )

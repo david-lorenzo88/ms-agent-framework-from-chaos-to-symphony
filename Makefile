@@ -1,5 +1,5 @@
 # From Chaos to Symphony - Baltic Summit 2026
-.PHONY: help install demo devui web smoke drive deck deck-qa lint clean
+.PHONY: help install demo devui web smoke drive deck deck-qa deploy lint clean
 
 PY := .venv/bin/python
 
@@ -12,6 +12,7 @@ help:
 	@echo "make drive     drive all twelve through the browser UI (needs make demo running)"
 	@echo "make deck      rebuild the session deck from deck/content.py"
 	@echo "make deck-qa   check the deck's text fits its boxes"
+	@echo "make deploy    publish to Azure Container Apps (needs az login)"
 
 # uv if it is on PATH, otherwise stdlib venv + pip. The first command someone
 # types after cloning should not fail on a tool they have never heard of.
@@ -52,6 +53,9 @@ deck:
 
 deck-qa:
 	$(PY) deck/qa_deck.py
+
+deploy:
+	./infra/deploy.sh
 
 lint:
 	. .venv/bin/activate && ruff check src scripts deck

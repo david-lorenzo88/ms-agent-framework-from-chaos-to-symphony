@@ -217,6 +217,79 @@ silently shift every note onto the wrong one.
 
 ---
 
+## Publishing it to Azure
+
+One command, once you are logged in. The image builds in Azure, so Docker is
+not needed locally either.
+
+```bash
+az login
+./infra/deploy.sh
+```
+
+It prints the URL. To change anything, pass it in:
+
+```bash
+RESOURCE_GROUP=rg-baltic LOCATION=northeurope ./infra/deploy.sh
+```
+
+### How it is put together
+
+Container Apps gives an app **one** external port, so both processes share a
+container: DevUI binds loopback only and the showcase reverse-proxies it —
+the SPA at `/devui/`, its API at `/v1/`, plus `/health` and `/meta`. That
+works because DevUI asks for all of them with relative URLs, and it means one
+origin, no CORS, and DevUI never exposed directly to the internet.
+
+The image installs `agent-framework-core` rather than the `agent-framework`
+meta-package. The meta-package pulls every provider — bedrock, gemini,
+mistral, ollama, qdrant, cosmos — for a **920 MB** install against **97 MB**
+for what this actually imports. On a container that scales to zero, that
+difference is cold-start time in front of an audience.
+
+### Before you make it public
+
+It deploys **offline** (`CHAOS_PROVIDER=offline`). That is the safe default and
+it is deliberate: a public URL with no authentication, running a deterministic
+scripted client, costs nothing and cannot be abused beyond burning a little CPU.
+
+**Point it at a real model and that changes.** Anyone who finds the URL can run
+workflows against your Azure OpenAI deployment, and DevUI ships with
+`auth_enabled=False` here so it can be embedded. If you want a live model on a
+public URL, put authentication in front of it first — Container Apps
+authentication (Easy Auth) with Entra ID is the least work:
+
+```bash
+az containerapp auth microsoft update -n chaos-to-symphony -g rg-chaos-to-symphony \
+  --client-id <app-id> --tenant-id <tenant> --yes
+az containerapp auth update -n chaos-to-symphony -g rg-chaos-to-symphony \
+  --unauthenticated-client-action RedirectToLoginPage
+```
+
+### Running costs
+
+One always-warm replica so the first visitor does not pay a cold start. After
+the session, scale it to zero or delete the group:
+
+```bash
+MIN_REPLICAS=0 ./infra/deploy.sh
+az group delete -n rg-chaos-to-symphony --yes --no-wait
+```
+
+### Providers
+
+`CHAOS_PROVIDER` takes `offline` (default), `openai`, `azure` or `foundry`.
+Azure OpenAI is reached by giving `OpenAIChatClient` an `azure_endpoint` —
+there is no `AzureOpenAIChatClient` in Agent Framework. The provider packages
+are extras, so the default image does not carry them:
+
+```bash
+pip install '.[openai]'    # OpenAI and Azure OpenAI
+pip install '.[foundry]'   # Foundry Agent Service
+```
+
+---
+
 ## Credits and references
 
 - [microsoft/agent-framework](https://github.com/microsoft/agent-framework) — the framework itself

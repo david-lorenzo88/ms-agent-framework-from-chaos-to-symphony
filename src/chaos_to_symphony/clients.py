@@ -36,8 +36,12 @@ def chat_client(persona: str = "agent", *, tool_budget: int = 1) -> Any:
     """Return a chat client for one agent persona.
 
     Falls back to the offline client - loudly - if a real provider is selected
-    but not configured. A half-configured provider should degrade to a working
-    demo, not a stack trace in front of an audience.
+    but not configured or not installed. A half-configured provider should
+    degrade to a working demo, not a stack trace in front of an audience.
+
+    There is no ``AzureOpenAIChatClient`` in Agent Framework: Azure OpenAI is
+    reached by giving ``OpenAIChatClient`` an ``azure_endpoint``, and the
+    Foundry Agent Service has its own client in a separate package.
     """
     name = provider()
 
@@ -46,25 +50,50 @@ def chat_client(persona: str = "agent", *, tool_budget: int = 1) -> Any:
         deployment = os.getenv("AZURE_OPENAI_DEPLOYMENT")
         if endpoint and deployment:
             try:
-                from agent_framework.azure import AzureOpenAIChatClient
+                from agent_framework.openai import OpenAIChatClient
 
-                return AzureOpenAIChatClient(
-                    endpoint=endpoint,
-                    deployment_name=deployment,
+                return OpenAIChatClient(
+                    model=deployment,
+                    azure_endpoint=endpoint,
                     api_key=os.getenv("AZURE_OPENAI_API_KEY"),
                     api_version=os.getenv("AZURE_OPENAI_API_VERSION", "2024-10-21"),
                 )
+            except ImportError:
+                _warn_once("agent-framework-openai is not installed; using the offline client. pip install '.[openai]'")
             except Exception as exc:  # pragma: no cover - configuration dependent
                 _warn_once(f"Azure client unavailable ({exc}); falling back to the offline scripted client.")
         else:
             _warn_once("CHAOS_PROVIDER=azure but endpoint/deployment are unset; using the offline scripted client.")
+
+    elif name == "foundry":
+        endpoint = os.getenv("FOUNDRY_PROJECT_ENDPOINT")
+        model = os.getenv("FOUNDRY_MODEL")
+        if endpoint and model:
+            try:
+                from agent_framework.foundry import FoundryChatClient
+                from azure.identity import DefaultAzureCredential
+
+                return FoundryChatClient(
+                    project_endpoint=endpoint, model=model, credential=DefaultAzureCredential()
+                )
+            except ImportError:
+                _warn_once(
+                    "agent-framework-foundry is not installed; using the offline client. "
+                    "pip install '.[foundry]'"
+                )
+            except Exception as exc:  # pragma: no cover - configuration dependent
+                _warn_once(f"Foundry client unavailable ({exc}); falling back to the offline scripted client.")
+        else:
+            _warn_once("CHAOS_PROVIDER=foundry but endpoint/model are unset; using the offline scripted client.")
 
     elif name == "openai":
         if os.getenv("OPENAI_API_KEY"):
             try:
                 from agent_framework.openai import OpenAIChatClient
 
-                return OpenAIChatClient(model_id=os.getenv("OPENAI_MODEL", "gpt-4o-mini"))
+                return OpenAIChatClient(model=os.getenv("OPENAI_MODEL", "gpt-4o-mini"))
+            except ImportError:
+                _warn_once("agent-framework-openai is not installed; using the offline client. pip install '.[openai]'")
             except Exception as exc:  # pragma: no cover - configuration dependent
                 _warn_once(f"OpenAI client unavailable ({exc}); falling back to the offline scripted client.")
         else:

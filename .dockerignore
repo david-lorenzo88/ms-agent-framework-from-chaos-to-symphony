@@ -1,0 +1,12 @@
+.venv/
+.git/
+__pycache__/
+*.py[cod]
+.env
+deck/build/
+deck/*.pptx
+docs/
+*.md
+!README.md
+.ruff_cache/
+.pytest_cache/
