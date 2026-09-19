@@ -48,6 +48,12 @@ az provider register --namespace Microsoft.OperationalInsights --only-show-error
 az group create --name "$RESOURCE_GROUP" --location "$LOCATION" --only-show-errors -o none
 
 echo "Building in Azure and deploying (first run takes a few minutes)..."
+echo
+
+# `az containerapp up` is not a normal command: it rejects the global
+# arguments (--only-show-errors, --output). Pass it only its own parameters.
+# Its output is left on screen on purpose - it is the build log, and it is the
+# only thing worth reading when a deploy goes wrong.
 az containerapp up \
   --name "$APP_NAME" \
   --resource-group "$RESOURCE_GROUP" \
@@ -56,28 +62,58 @@ az containerapp up \
   --source . \
   --ingress external \
   --target-port 8000 \
-  --only-show-errors
+  --env-vars \
+      CHAOS_PROVIDER="$CHAOS_PROVIDER" \
+      CHAOS_PROXY_DEVUI=1 \
+      CHAOS_HOST=0.0.0.0 \
+      SHOWCASE_PORT=8000 \
+      DEVUI_PORT=8080
 
-# `up` does not take these, so apply them in a second pass.
+# Sizing and scale are not parameters of `up`, so they need a second pass.
+echo
+echo "Applying sizing and scale..."
 az containerapp update \
   --name "$APP_NAME" \
   --resource-group "$RESOURCE_GROUP" \
   --cpu "$CPU" --memory "$MEMORY" \
   --min-replicas "$MIN_REPLICAS" --max-replicas "$MAX_REPLICAS" \
-  --set-env-vars \
-      CHAOS_PROVIDER="$CHAOS_PROVIDER" \
-      CHAOS_PROXY_DEVUI=1 \
-      CHAOS_HOST=0.0.0.0 \
-      SHOWCASE_PORT=8000 \
-      DEVUI_PORT=8080 \
   --only-show-errors -o none
 
 FQDN=$(az containerapp show --name "$APP_NAME" --resource-group "$RESOURCE_GROUP" \
-        --query properties.configuration.ingress.fqdn -o tsv)
+        --query properties.configuration.ingress.fqdn -o tsv --only-show-errors)
+
+if [ -z "$FQDN" ]; then
+  echo "Deployed, but no ingress hostname came back. Check:"
+  echo "  az containerapp show -n $APP_NAME -g $RESOURCE_GROUP"
+  exit 1
+fi
+
+URL="https://${FQDN}"
+echo
+echo "  $URL"
+echo
+
+# Don't just print a URL and claim success - the revision needs a moment, and a
+# container that crash-loops would otherwise look like a good deploy.
+echo -n "Waiting for it to answer"
+for _ in $(seq 1 30); do
+  if curl -fsS --max-time 5 "${URL}/api/health" >/dev/null 2>&1; then
+    echo
+    echo "Healthy:"
+    curl -fsS "${URL}/api/health"
+    echo
+    echo
+    echo "  Showcase : $URL"
+    echo "  DevUI    : ${URL}/devui/"
+    echo "  Logs     : az containerapp logs show -n $APP_NAME -g $RESOURCE_GROUP --follow"
+    echo "  Tear down: az group delete -n $RESOURCE_GROUP --yes --no-wait"
+    exit 0
+  fi
+  echo -n "."
+  sleep 5
+done
 
 echo
-echo "  https://${FQDN}"
-echo
-echo "Check it:   curl -s https://${FQDN}/api/health"
-echo "Logs:       az containerapp logs show -n $APP_NAME -g $RESOURCE_GROUP --follow"
-echo "Tear down:  az group delete -n $RESOURCE_GROUP --yes --no-wait"
+echo "It deployed but did not answer /api/health within 150s. Look at the logs:"
+echo "  az containerapp logs show -n $APP_NAME -g $RESOURCE_GROUP --follow"
+exit 1
