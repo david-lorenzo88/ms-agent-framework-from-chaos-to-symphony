@@ -233,6 +233,13 @@ It prints the URL. To change anything, pass it in:
 RESOURCE_GROUP=rg-baltic LOCATION=northeurope ./infra/deploy.sh
 ```
 
+Four explicit steps — environment, registry, `az acr build`, then create or
+update the app. It deliberately avoids `az containerapp up`, which is a
+convenience wrapper that rejects the global `az` arguments and whose
+source-to-cloud path crashes inside the CLI's own `queue_acr_build`
+(`'NoneType' object has no attribute 'linux'`). The explicit commands do the
+same work and are the documented code-to-cloud path.
+
 ### How it is put together
 
 Container Apps gives an app **one** external port, so both processes share a
@@ -282,9 +289,20 @@ az containerapp env show -n env-chaos-to-symphony -g rg-chaos-to-symphony \
   --query properties.provisioningState -o tsv
 ```
 
-If it happens repeatedly, suspect the network between you and Azure rather than
-the script — a VPN, a corporate proxy, or an IPv6 route that black-holes. A
-quick check:
+If the failure is instead a Python traceback ending in `AttributeError` or
+`TypeError` deep inside the CLI, that is a CLI bug rather than your setup.
+`az upgrade` is worth a try; failing that, build and push by hand and point the
+script at the result:
+
+```bash
+az acr build --registry <acr-name> --image chaos-to-symphony:manual --file Dockerfile .
+az containerapp update -n chaos-to-symphony -g rg-chaos-to-symphony \
+  --image <acr-name>.azurecr.io/chaos-to-symphony:manual
+```
+
+If a timeout happens repeatedly, suspect the network between you and Azure
+rather than the script — a VPN, a corporate proxy, or an IPv6 route that
+black-holes. A quick check:
 
 ```bash
 curl -sS -o /dev/null -w '%{http_code} in %{time_total}s\n' https://management.azure.com/
