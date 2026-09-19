@@ -12,9 +12,17 @@ help:
 	@echo "make deck      rebuild the session deck from deck/content.py"
 	@echo "make deck-qa   check the deck's text fits its boxes"
 
+# uv if it is on PATH, otherwise stdlib venv + pip. The first command someone
+# types after cloning should not fail on a tool they have never heard of.
 install:
-	uv venv --python 3.12 .venv
-	. .venv/bin/activate && uv pip install -e ".[dev]"
+	@if command -v uv >/dev/null 2>&1; then \
+		echo "using uv"; \
+		uv venv --python 3.12 .venv && . .venv/bin/activate && uv pip install -e ".[dev]"; \
+	else \
+		echo "uv not found, using python -m venv"; \
+		python3 -m venv .venv && . .venv/bin/activate && pip install --upgrade pip -q && pip install -e ".[dev]"; \
+	fi
+	@echo ""
 	@echo "Done. Run: make demo"
 
 demo:

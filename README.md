@@ -58,8 +58,11 @@ everything around them, which is rather the point of the session.
 ### Install
 
 ```bash
-make install        # uv venv + dependencies, Python 3.12
+make install        # venv + dependencies
 ```
+
+Uses [uv](https://github.com/astral-sh/uv) when it is on your PATH and falls
+back to `python -m venv` + `pip` when it is not. Python 3.10 or newer.
 
 ### The showcase
 
