@@ -26,7 +26,7 @@ from fastapi.responses import FileResponse, StreamingResponse
 from fastapi.staticfiles import StaticFiles
 from pydantic import BaseModel
 
-from . import __version__
+from . import __version__, telemetry
 from .clients import is_offline, provider
 from .memory import STORE
 from .registry import PATTERNS, TIERS, get
@@ -45,11 +45,13 @@ SESSIONS: dict[str, RunSession] = {}
 @asynccontextmanager
 async def lifespan(app: FastAPI):
     logging.basicConfig(level=logging.INFO, format="%(asctime)s  %(levelname)-7s %(message)s")
+    traced = telemetry.install()
     print()
     print("  From Chaos to Symphony - Baltic Summit 2026")
     print(f"  Showcase: http://localhost:{os.getenv('SHOWCASE_PORT', '8000')}")
     print(f"  DevUI:    {DEVUI_URL}  (start it with: python -m chaos_to_symphony.devui_app)")
     print(f"  Provider: {provider()}" + ("  (offline - no keys, no network)" if is_offline() else ""))
+    print(f"  Traces:   {'OpenTelemetry capture on' if traced else 'unavailable'}")
     print()
     yield
     for session in list(SESSIONS.values()):
@@ -210,6 +212,15 @@ async def approve(run_id: str, body: ApprovalRequest) -> dict[str, Any]:
     if not accepted:
         raise HTTPException(status_code=409, detail="No pending approval with that id")
     return {"ok": True, "decision": body.decision}
+
+
+@app.get("/api/traces/{run_id}")
+async def traces(run_id: str) -> dict[str, Any]:
+    """The OpenTelemetry spans for one run, for the Traces tab."""
+    session = SESSIONS.get(run_id)
+    if session is None:
+        raise HTTPException(status_code=404, detail="Unknown run")
+    return {"runId": run_id, "pattern": session.spec.slug, "spans": session.traces}
 
 
 @app.post("/api/reset")

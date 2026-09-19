@@ -98,6 +98,7 @@
 
       <div class="tabs" role="tablist">
         <button class="tab is-on" data-tab="log"   role="tab">Live log</button>
+        <button class="tab"       data-tab="traces" role="tab">Traces</button>
         <button class="tab"       data-tab="devui" role="tab">DevUI</button>
         <button class="tab"       data-tab="audit" role="tab">Audit trail</button>
         <button class="tab"       data-tab="store" role="tab">In-memory store</button>
@@ -105,11 +106,26 @@
 
       <div class="panel is-on" id="panel-log"><div class="console" id="console"><p class="console-empty">Press <strong>Run pattern</strong> to stream this workflow's events.</p></div></div>
 
+      <div class="panel" id="panel-traces">
+        <div class="devui-bar">
+          <span id="tracesNote">Run a pattern to capture its spans.</span>
+          <label class="trace-toggle"><input type="checkbox" id="tracePlumbing"> show edges &amp; messages</label>
+        </div>
+        <div class="waterfall" id="waterfall"></div>
+      </div>
+
       <div class="panel" id="panel-devui">
         <div class="devui-bar">
           <span id="devuiState">checking DevUI…</span>
           <a id="devuiOpen" class="btn btn-small" target="_blank" rel="noopener" href="#">Open in a tab</a>
         </div>
+        <p class="devui-note">
+          DevUI renders the runs <strong>you start inside it</strong> — its timeline is client-side state
+          from its own stream, and it accepts only <code>entity_id</code> from the URL. A run started from
+          the Run&nbsp;pattern button above therefore cannot appear here. Use <strong>Configure &amp; Run</strong>
+          below to drive this same workflow through DevUI, or the <strong>Traces</strong> tab to see the
+          framework's own spans for the run you already did.
+        </p>
         <iframe id="devuiFrame" title="Agent Framework DevUI" loading="lazy"></iframe>
       </div>
 

@@ -15,6 +15,7 @@ import uuid
 from dataclasses import dataclass, field
 from typing import Any
 
+from . import telemetry
 from .base import PatternSpec
 from .memory import STORE
 from .scripted import reset_context
@@ -37,6 +38,9 @@ class RunSession:
     started_at: float = field(default_factory=time.time)
     done: bool = False
     task: asyncio.Task[None] | None = None
+    traces: list[dict[str, Any]] = field(default_factory=list)
+    """OpenTelemetry spans for this run, kept so switching to the Traces tab
+    afterwards shows the run you just did rather than nothing."""
 
     # -- emit helpers ------------------------------------------------------
 
@@ -213,18 +217,23 @@ async def execute(session: RunSession) -> None:
     session.log("info", "runner", f"provider={_provider()}  pattern={session.spec.slug}")
     session.emit("start", pattern=session.spec.slug, prompt=session.prompt)
     try:
-        if session.spec.demo is not None:
-            # Checkpoint-resume and guardrails drive the workflow more than
-            # once, so they narrate themselves.
-            session.log("info", "runner", "pattern supplies its own runner")
-            for line in await session.spec.demo(session.prompt):
-                session.emit("output", source=session.spec.slug, text=line)
-        else:
-            await _drive_workflow(session)
-        session.log("info", "runner", "run complete")
+        # Everything the workflow emits inside this block is captured, including
+        # from the sub-tasks the concurrent pattern spawns.
+        with telemetry.collect() as spans:
+            if session.spec.demo is not None:
+                # Checkpoint-resume and guardrails drive the workflow more than
+                # once, so they narrate themselves.
+                session.log("info", "runner", "pattern supplies its own runner")
+                for line in await session.spec.demo(session.prompt):
+                    session.emit("output", source=session.spec.slug, text=line)
+            else:
+                await _drive_workflow(session)
+        session.traces = telemetry.summarise(spans)
+        session.log("info", "runner", f"run complete - {len(session.traces)} spans captured")
     except Exception as exc:
         session.log("error", "runner", f"{type(exc).__name__}: {exc}")
     finally:
+        session.emit("traces", rows=session.traces)
         session.emit("audit", rows=STORE.audit_dicts())
         session.emit("end")
         session.done = True

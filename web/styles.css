@@ -306,6 +306,50 @@ code { font-family: var(--mono); font-size: .88em; }
   background: #F2F6FB; border: 1px solid var(--line); border-radius: var(--radius-sm);
   font-size: .78rem; color: var(--ink-soft);
 }
+.devui-note {
+  margin: 0 0 .7rem; padding: .7rem .9rem;
+  background: #FFF8EC; border: 1px solid #F6E2C0; border-radius: var(--radius-sm);
+  font-size: .79rem; line-height: 1.55; color: #7A4A00;
+}
+.devui-note code { background: #F6E2C0; padding: .05rem .3rem; border-radius: 4px; }
+
+.trace-toggle { display: flex; align-items: center; gap: .4rem; font-size: .76rem; cursor: pointer; }
+
+/* Trace waterfall: one row per span, bar offset and width to scale. */
+.waterfall { max-height: 420px; overflow-y: auto; }
+.wf-row {
+  display: grid; grid-template-columns: 5.6rem 1fr 4.6rem; gap: .6rem;
+  align-items: center; padding: .16rem 0; font-size: .76rem;
+}
+.wf-row + .wf-row { border-top: 1px solid #F2F5F9; }
+.wf-kind {
+  font-family: var(--mono); font-size: .64rem; letter-spacing: .05em; text-transform: uppercase;
+  padding: .12rem .35rem; border-radius: 4px; text-align: center;
+}
+.wf-agent    { background: #EAF1F9; color: var(--navy); }
+.wf-tool     { background: #E6F6EA; color: #1F6B33; }
+.wf-executor { background: #FFF1DC; color: #8A5200; }
+.wf-workflow { background: #F1EBFA; color: #533A78; }
+.wf-plumbing { background: #F2F5F9; color: var(--ink-faint); }
+.wf-other    { background: #F2F5F9; color: var(--ink-faint); }
+
+.wf-track { position: relative; height: 18px; background: #F6F9FC; border-radius: 4px; overflow: hidden; }
+.wf-bar {
+  position: absolute; top: 3px; height: 12px; border-radius: 3px;
+  background: var(--steel); min-width: 2px;
+}
+.wf-bar.is-agent    { background: var(--navy); }
+.wf-bar.is-tool     { background: var(--mint); }
+.wf-bar.is-executor { background: var(--amber-warm); }
+.wf-bar.is-plumbing { background: #C3CEDC; }
+.wf-label {
+  position: absolute; left: 0; top: 0; height: 18px; line-height: 18px;
+  padding-left: .4rem; font-size: .72rem; color: var(--ink); white-space: nowrap;
+  pointer-events: none; text-shadow: 0 0 3px #fff, 0 0 3px #fff;
+}
+.wf-ms { font-family: var(--mono); font-size: .72rem; color: var(--ink-faint); text-align: right; }
+.wf-empty { color: var(--ink-faint); font-size: .84rem; padding: 1rem 0; }
+
 #devuiFrame {
   width: 100%; height: 620px; border: 1px solid var(--line);
   border-radius: var(--radius-sm); background: #fff;

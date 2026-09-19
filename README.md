@@ -73,8 +73,30 @@ make demo           # runs both servers
 - **http://localhost:8000** — the showcase site: pick a pattern, read it, run
   it, watch the diagram light up and the log stream.
 - **http://localhost:8080** — DevUI, with all twelve workflows registered. The
-  site embeds it per pattern, so you can flip between "the story" and "the
-  framework's own view" without leaving the page.
+  site embeds it per pattern so you can drive a workflow through the
+  framework's own tooling.
+
+### Traces, and what DevUI can and cannot show
+
+The **Traces** tab is the framework's own view of the run you just did: the
+OpenTelemetry spans Agent Framework emits — `invoke_agent`, `execute_tool`,
+`executor.process`, and the edge and message plumbing underneath — drawn as a
+waterfall. Put Sequential and Concurrent side by side and the picture makes the
+argument for you: a clean staircase against overlapping bars.
+
+It exists because **DevUI can only display runs you start inside it.** Its
+timeline is client-side state from the stream it opened, its frontend reads
+only `entity_id` from the URL, it exposes no postMessage API, and this build
+ships no server-side trace-retrieval endpoint. A run started from the
+*Run pattern* button therefore cannot appear in the embedded DevUI timeline —
+so the showcase captures the same telemetry itself rather than making you run
+the pattern twice.
+
+Routing runs through DevUI's `/v1/responses` API instead was tried and rejected:
+the in-memory store lives per process, so the audit trail and stock of shipments
+would mutate inside DevUI and vanish from this page, the human-in-the-loop
+approval gate would break, and patterns 11 and 12 drive their workflow more than
+once and cannot go through that API at all.
 
 Deep-link a single pattern from a slide: `http://localhost:8000/?pattern=handoff`
 

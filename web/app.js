@@ -29,6 +29,7 @@ const state = {
   devui: { available: false, url: '', entities: {} },
   source: null,      // EventSource for the live run
   runId: null,
+  traces: [],        // OpenTelemetry spans from the last run
   nodes: new Map(),  // diagram node id -> <g>
   approvalTimer: null,
 };
@@ -111,6 +112,8 @@ function select(pattern) {
     : 'nodes light up as the workflow runs';
 
   drawDiagram(pattern.diagram);
+  state.traces = [];
+  renderTraces();
   resetConsole();
   pointDevuiAt(pattern.slug);
 
@@ -342,12 +345,14 @@ function wireControls() {
       document.querySelectorAll('.tab').forEach((t) => t.classList.toggle('is-on', t === tab));
       document.querySelectorAll('.panel').forEach((p) =>
         p.classList.toggle('is-on', p.id === 'panel-' + tab.dataset.tab));
+      if (tab.dataset.tab === 'traces') renderTraces();
       if (tab.dataset.tab === 'audit') loadAudit();
       if (tab.dataset.tab === 'store') loadStore();
       if (tab.dataset.tab === 'devui') refreshDevui();
     });
   });
 
+  $('tracePlumbing').addEventListener('change', renderTraces);
   $('approveBtn').addEventListener('click', () => answerApproval('approve'));
   $('rejectBtn').addEventListener('click', () => answerApproval('reject'));
 }
@@ -358,6 +363,8 @@ async function run() {
   clearNodes();
   resetConsole();
 
+  state.traces = [];
+  renderTraces();
   $('runBtn').disabled = true;
   $('runState').textContent = 'running…';
 
@@ -403,6 +410,10 @@ function handleFrame(frame) {
     case 'approvalResolved':
       hideApproval();
       logLine('info', 'request_info', `resolved: ${frame.decision}`);
+      break;
+    case 'traces':
+      state.traces = frame.rows || [];
+      renderTraces();
       break;
     case 'audit':
       renderAudit(frame.rows);
@@ -529,6 +540,55 @@ async function answerApproval(decision) {
     body: JSON.stringify({ requestId: pendingRequestId, decision }),
   });
   hideApproval();
+}
+
+/* ── traces ───────────────────────────────────────────────────── */
+
+/**
+ * Waterfall of the run's OpenTelemetry spans.
+ *
+ * This is the framework's own view of the run - the same substance DevUI's
+ * trace panel shows - rendered here because DevUI can only display runs it
+ * started itself. On the concurrent pattern the overlapping bars are the point:
+ * they are what parallelism actually looks like.
+ */
+function renderTraces() {
+  const host = $('waterfall');
+  const note = $('tracesNote');
+  const showPlumbing = $('tracePlumbing').checked;
+  host.innerHTML = '';
+
+  const all = state.traces || [];
+  if (!all.length) {
+    note.textContent = 'Run a pattern to capture its spans.';
+    host.appendChild(el('p', 'wf-empty', 'No spans yet — press Run pattern.'));
+    return;
+  }
+
+  const rows = showPlumbing ? all : all.filter((s) => s.kind !== 'plumbing');
+  const span = Math.max(...all.map((s) => s.offsetMs + s.durationMs), 1);
+  const hidden = all.length - rows.length;
+  note.textContent =
+    `${rows.length} span${rows.length === 1 ? '' : 's'} over ${span.toFixed(1)}ms` +
+    (hidden ? ` · ${hidden} edge/message span${hidden === 1 ? '' : 's'} hidden` : '');
+
+  for (const s of rows) {
+    const row = el('div', 'wf-row');
+    row.appendChild(el('span', `wf-kind wf-${s.kind}`, s.kind));
+
+    const track = el('div', 'wf-track');
+    const bar = el('div', `wf-bar is-${s.kind}`);
+    // Percentages, so the waterfall scales with the panel rather than a fixed px width.
+    bar.style.left = `${(s.offsetMs / span) * 100}%`;
+    bar.style.width = `${Math.max((s.durationMs / span) * 100, 0.6)}%`;
+    track.appendChild(bar);
+    track.appendChild(el('div', 'wf-label', s.subject || s.name));
+    track.title = `${s.name}  +${s.offsetMs}ms  ${s.durationMs}ms`;
+    row.appendChild(track);
+
+    row.appendChild(el('span', 'wf-ms', `${s.durationMs.toFixed(1)}ms`));
+    host.appendChild(row);
+  }
 }
 
 /* ── devui ────────────────────────────────────────────────────── */
