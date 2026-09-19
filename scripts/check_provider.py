@@ -105,12 +105,16 @@ async def main() -> int:
         print("The provider works. It is using:")
         print(f"  api_version : {status['apiVersion'] or '(framework default)'}")
         print(f"  endpoint    : {status['baseUrl'] or '(unknown)'}")
-        if os.getenv("AZURE_OPENAI_API_VERSION"):
-            print("\n  (pinned by AZURE_OPENAI_API_VERSION)")
+        pinned = os.getenv("AZURE_OPENAI_API_VERSION")
+        if pinned:
+            print(f"\n  Pinned by AZURE_OPENAI_API_VERSION={pinned}.")
+            print("  Unset it unless this resource specifically needs it - the framework's")
+            print("  own default tracks the service, and a pinned date goes stale.")
         else:
-            print("\n  Nothing is pinned - this is the framework's own default, which is")
-            print("  what you want unless a resource specifically rejects it. To freeze it:")
-            print(f"    AZURE_OPENAI_API_VERSION={status['apiVersion']}")
+            print("\n  Nothing is pinned, which is the right setting. Leave it that way:")
+            print("  the base URL is Azure's v1 surface either way, so pinning a dated")
+            print("  version sends a date to a v1 endpoint and gets 'API version not")
+            print("  supported' - which is how the first live run here broke.")
         print("\nRun: make demo")
         return 0
 
