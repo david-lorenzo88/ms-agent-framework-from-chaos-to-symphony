@@ -10,12 +10,35 @@ calling one, which means routing shows up in the trace like any other tool call.
 
 from __future__ import annotations
 
-from agent_framework import Agent
+from agent_framework import Agent, Message
 from agent_framework.orchestrations import HandoffBuilder
 
 from ..base import DiagramEdge, DiagramNode, PatternSpec
 from ..clients import chat_client
 from ..tools import CASE_TOOLS, CUSTOMS_TOOLS
+
+
+def resolved(conversation: list[Message]) -> bool:
+    """End once a participant has actually answered the case.
+
+    Handoff is conversational by design: left alone the workflow asks the user
+    for another turn after every reply, so a single-shot demo loops - specialist
+    answers, workflow asks, we answer, specialist answers again - until the
+    runner gives up at a hundred iterations. That is this pattern's own
+    hot-potato failure mode, met from the outside rather than in theory.
+
+    The test is "the last message is a non-empty assistant reply" rather than
+    the more obvious "a handoff tool was called". The conversation handed to a
+    termination condition has already been through
+    ``clean_conversation_for_handoff``, so the routing tool calls are stripped
+    out of it and simply cannot be seen from here - measured, not assumed.
+    Triage's own turn is one of those stripped tool calls, which is why this
+    does not fire before the case has been routed.
+    """
+    if not conversation:
+        return False
+    last = conversation[-1]
+    return str(last.role) == "assistant" and bool((getattr(last, "text", "") or "").strip())
 
 
 def build():
@@ -82,6 +105,7 @@ def build():
             name="Handoff",
             participants=[triage, customs, compliance, claims, ops],
             description="Freight exception desk with specialist routing.",
+            termination_condition=resolved,
         )
         .with_start_agent(triage)
         .add_handoff(triage, [customs, compliance, claims, ops])

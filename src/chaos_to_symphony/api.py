@@ -186,6 +186,11 @@ async def stream(run_id: str) -> StreamingResponse:
                 continue
             yield f"data: {json.dumps(frame)}\n\n"
             if frame.get("kind") == "end":
+                # Closing here shows up in devtools as an aborted request. That
+                # is simply how EventSource ends - there is no graceful close
+                # handshake, so whichever side hangs up first looks like the
+                # failure. Delaying it only moves the abort to the client and
+                # adds latency, so hang up promptly.
                 break
 
     return StreamingResponse(

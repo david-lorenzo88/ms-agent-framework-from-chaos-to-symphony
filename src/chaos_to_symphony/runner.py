@@ -58,16 +58,31 @@ class RunSession:
         Diagram nodes are authored for the audience, so their ids are short
         ('customs') while the framework's are full agent names
         ('customs-specialist'). Match on label first, then on containment.
+
+        The third rule exists because the orchestration builders name their
+        coordinator after the *pattern*, not after the agent you handed them:
+        Magentic reports 'magentic_orchestrator' and GroupChat reports
+        'group_chat_orchestrator', neither of which resembles the manager or
+        chair drawn on the diagram. Those are the most important boxes in both
+        pictures, and without this they were the only two that never lit up.
         """
         if not executor_id:
             return None
         lowered = executor_id.lower()
+
         for node in self.spec.nodes:
             if node.label.lower() == lowered:
                 return node.id
         for node in self.spec.nodes:
             if node.id.lower() in lowered or lowered in node.label.lower():
                 return node.id
+
+        if "orchestrator" in lowered or "manager" in lowered:
+            coordinators = [n for n in self.spec.nodes if n.kind == "orchestrator"]
+            # Only when it is unambiguous: Concurrent draws two (dispatcher and
+            # aggregator) and guessing between them would light the wrong box.
+            if len(coordinators) == 1:
+                return coordinators[0].id
         return None
 
     # -- approval ----------------------------------------------------------
@@ -83,7 +98,7 @@ class RunSession:
 
 async def _drive_workflow(session: RunSession) -> None:
     """Run a workflow with streaming, translating events as they arrive."""
-    from agent_framework.orchestrations import AgentRequestInfoResponse
+    from agent_framework.orchestrations import AgentRequestInfoResponse, HandoffAgentUserRequest
 
     workflow = session.spec.build()
     stream = workflow.run(session.prompt, stream=True)
@@ -118,14 +133,28 @@ async def _drive_workflow(session: RunSession) -> None:
 
             elif kind == "request_info":
                 request_id = getattr(event, "request_id", "") or str(uuid.uuid4())
-                decision = await _ask_human(session, request_id, event)
-                pending[request_id] = (
-                    AgentRequestInfoResponse.approve()
-                    if decision == "approve"
-                    else AgentRequestInfoResponse.from_strings(
-                        ["Rejected by the duty manager. Re-price at or below the approval threshold."]
+                request = getattr(event, "data", None)
+
+                if isinstance(request, HandoffAgentUserRequest):
+                    # Not an approval gate. Handoff is conversational: after a
+                    # participant speaks it asks what the *user* says next, and
+                    # it wants list[Message] back. Answering it with an approval
+                    # object raises "Response type mismatch" and strands the run.
+                    # A showcase run is single-shot, so close the conversation.
+                    session.log("info", "request_info",
+                                "handoff asked for the user's next turn - closing the conversation")
+                    pending[request_id] = HandoffAgentUserRequest.create_response(
+                        "That resolves it, thank you."
                     )
-                )
+                else:
+                    decision = await _ask_human(session, request_id, event)
+                    pending[request_id] = (
+                        AgentRequestInfoResponse.approve()
+                        if decision == "approve"
+                        else AgentRequestInfoResponse.from_strings(
+                            ["Rejected by the duty manager. Re-price at or below the approval threshold."]
+                        )
+                    )
 
             elif kind == "error":
                 session.log("error", executor_id or "workflow", str(getattr(event, "data", "")))
