@@ -100,11 +100,35 @@ once and cannot go through that API at all.
 
 Deep-link a single pattern from a slide: `http://localhost:8000/?pattern=handoff`
 
-### One pattern from the terminal
+### Checking it still works
+
+Two harnesses, and they catch different things.
 
 ```bash
-make smoke                      # all twelve, end to end
-python scripts/smoke.py handoff # just one
+make smoke                        # all twelve, end to end, no browser
+python scripts/smoke.py handoff   # just one
+```
+
+`smoke.py` calls `workflow.run()` directly. Fast, no browser, good for CI.
+
+```bash
+make demo                         # in one terminal
+make drive                        # in another
+python scripts/drive.py handoff   # just one
+python scripts/drive.py --headed  # watch it happen
+```
+
+`drive.py` drives the real page: it runs each pattern, answers the approval
+gate, and checks the run completed, produced output, lit up diagram nodes,
+kept the diagram inside its viewBox, captured spans, and logged no errors —
+in the browser or on the server. Every bug found in this repo so far lived in
+exactly those places and none of them showed up in `smoke.py`. Run it before
+the session. It exits non-zero if anything is wrong.
+
+It needs Playwright's browser once:
+
+```bash
+.venv/bin/pip install playwright && .venv/bin/playwright install chromium
 ```
 
 ### With a real model
