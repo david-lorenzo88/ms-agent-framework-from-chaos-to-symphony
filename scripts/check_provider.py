@@ -25,8 +25,12 @@ load_dotenv()
 
 from chaos_to_symphony.clients import effective, provider  # noqa: E402
 
-#: Newest first - the first that works is the one to pin.
+#: "preview" first: left unpinned the framework targets Azure OpenAI's v1
+#: surface (base_url .../openai/v1/, api_version "preview") rather than the
+#: classic dated path, and on a current resource the dated ones are exactly
+#: what gets rejected. The dated versions follow for older resources.
 CANDIDATES = (
+    "preview",
     "2025-04-01-preview",
     "2025-03-01-preview",
     "2025-01-01-preview",
@@ -96,7 +100,18 @@ async def main() -> int:
     print("\nMaking one request...")
     ok, detail = await try_call(chat_client("probe"))
     if ok:
-        print(f"  OK -> {detail!r}\n\nThe provider works. Run: make demo")
+        print(f"  OK -> {detail!r}")
+        print()
+        print("The provider works. It is using:")
+        print(f"  api_version : {status['apiVersion'] or '(framework default)'}")
+        print(f"  endpoint    : {status['baseUrl'] or '(unknown)'}")
+        if os.getenv("AZURE_OPENAI_API_VERSION"):
+            print("\n  (pinned by AZURE_OPENAI_API_VERSION)")
+        else:
+            print("\n  Nothing is pinned - this is the framework's own default, which is")
+            print("  what you want unless a resource specifically rejects it. To freeze it:")
+            print(f"    AZURE_OPENAI_API_VERSION={status['apiVersion']}")
+        print("\nRun: make demo")
         return 0
 
     print(f"  FAILED: {detail}")

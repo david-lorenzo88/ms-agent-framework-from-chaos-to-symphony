@@ -87,6 +87,8 @@ async def lifespan(app: FastAPI):
     status = effective()
     print(f"  Provider: {status['active']} via {status['client']}"
           + ("  (no keys, no network)" if not status["live"] else ""))
+    if status.get("baseUrl"):
+        print(f"  Endpoint: {status['baseUrl']}  (api_version={status['apiVersion'] or 'default'})")
     if status["note"]:
         print(f"  WARNING:  {status['note']}")
     print(f"  Traces:   {'OpenTelemetry capture on' if traced else 'unavailable'}")

@@ -32,6 +32,24 @@ def _warn_once(message: str) -> None:
     logging.getLogger(__name__).warning(message)
 
 
+def describe_endpoint(client: Any) -> dict[str, str]:
+    """The API version and base URL a live client will actually use.
+
+    Worth surfacing rather than assuming: left to itself the framework targets
+    Azure OpenAI's v1 surface - base_url ending /openai/v1/ with api_version
+    "preview" - not the classic dated ?api-version=YYYY-MM-DD path. Passing a
+    dated version is what produces "API version not supported" against a
+    current resource.
+    """
+    inner = getattr(client, "client", None) or getattr(client, "async_client", None)
+    version = getattr(client, "api_version", None) or getattr(inner, "_api_version", None)
+    base_url = getattr(inner, "base_url", None)
+    return {
+        "apiVersion": str(version) if version else "",
+        "baseUrl": str(base_url) if base_url else "",
+    }
+
+
 @lru_cache(maxsize=1)
 def effective() -> dict[str, Any]:
     """What the app will *actually* use, not what was asked for.
@@ -53,6 +71,7 @@ def effective() -> dict[str, Any]:
         }
 
     live = name != "ScriptedChatClient"
+    endpoint = describe_endpoint(client) if live else {"apiVersion": "", "baseUrl": ""}
     note = ""
     if requested != "offline" and not live:
         note = (
@@ -64,6 +83,8 @@ def effective() -> dict[str, Any]:
         "active": requested if live else "offline",
         "live": live,
         "client": name,
+        "apiVersion": endpoint["apiVersion"],
+        "baseUrl": endpoint["baseUrl"],
         "note": note,
     }
 

@@ -368,12 +368,26 @@ Check a provider before running twelve patterns against it:
 make check
 ```
 
-One minimal request, then a plain answer. If it fails with **`API version not
-supported`** it walks the known Azure API versions and tells you which one your
-resource accepts, to put in `AZURE_OPENAI_API_VERSION`. The version is
-otherwise left unset deliberately — pinning one here overrides the framework's
-own default and goes stale, which is exactly how `2024-10-21` ended up being
-rejected by a current resource.
+One minimal request, then a plain answer — including the API version and
+endpoint it actually used, so you are never guessing what is in play:
+
+```
+The provider works. It is using:
+  api_version : preview
+  endpoint    : https://<resource>.openai.azure.com/openai/v1/
+```
+
+**Leave `AZURE_OPENAI_API_VERSION` unset.** Left alone, the framework targets
+Azure OpenAI's **v1 surface** — `base_url` ending `/openai/v1/` with
+`api_version` set to the literal string `preview`, not a date. The base URL is
+that v1 path either way, so pinning a *dated* version sends a dated
+`api-version` to a v1 endpoint, and the service answers `400 API version not
+supported`. That is precisely how a hard-coded `2024-10-21` default broke the
+first live run here.
+
+Pin it only if your resource genuinely needs a dated version. If the check
+fails with that error it walks the candidates — `preview` first, then the dated
+ones — and tells you which your resource accepts.
 
 The badge in the header reports the provider **actually in use**, not the one
 configured. Ask for a provider that is not available and it turns red and says
