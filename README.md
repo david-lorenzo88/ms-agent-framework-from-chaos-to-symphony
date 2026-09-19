@@ -266,6 +266,33 @@ az containerapp auth update -n chaos-to-symphony -g rg-chaos-to-symphony \
   --unauthenticated-client-action RedirectToLoginPage
 ```
 
+### If the deploy drops out
+
+`az` talking to `management.azure.com` from a laptop is the least reliable part
+of this. A dropped connection surfaces as a `ConnectTimeout` traceback, which
+looks alarming but usually means only that the CLI lost the poll — the resource
+it was waiting on carries on provisioning in Azure.
+
+**Re-run the script.** Every step checks what already exists first, so it
+resumes rather than starting over. To see where it got to:
+
+```bash
+az group show -n rg-chaos-to-symphony --query properties.provisioningState -o tsv
+az containerapp env show -n env-chaos-to-symphony -g rg-chaos-to-symphony \
+  --query properties.provisioningState -o tsv
+```
+
+If it happens repeatedly, suspect the network between you and Azure rather than
+the script — a VPN, a corporate proxy, or an IPv6 route that black-holes. A
+quick check:
+
+```bash
+curl -sS -o /dev/null -w '%{http_code} in %{time_total}s\n' https://management.azure.com/
+curl -4 -sS -o /dev/null -w 'IPv4: %{http_code}\n' https://management.azure.com/
+```
+
+If the plain call hangs and `-4` succeeds, it is IPv6.
+
 ### Running costs
 
 One always-warm replica so the first visitor does not pay a cold start. After

@@ -47,7 +47,63 @@ az provider register --namespace Microsoft.OperationalInsights --only-show-error
 
 az group create --name "$RESOURCE_GROUP" --location "$LOCATION" --only-show-errors -o none
 
+# ---------------------------------------------------------------------------
+# The managed environment, created separately and on purpose.
+#
+# Letting `up` create it means the CLI holds one long poll against
+# management.azure.com for several minutes, and a single dropped connection
+# takes the whole deploy down with a traceback - even though the environment
+# is provisioning happily server-side. Creating it with --no-wait and polling
+# in short calls survives that: each probe is a fresh request, and a failed
+# one is just a dot.
+# ---------------------------------------------------------------------------
+
+env_state() {
+  az containerapp env show --name "$ENVIRONMENT" --resource-group "$RESOURCE_GROUP" \
+     --query properties.provisioningState -o tsv --only-show-errors 2>/dev/null || true
+}
+
+STATE="$(env_state)"
+
+if [ -z "$STATE" ]; then
+  echo "Creating the Container Apps environment (this takes a few minutes)..."
+  az containerapp env create \
+    --name "$ENVIRONMENT" \
+    --resource-group "$RESOURCE_GROUP" \
+    --location "$LOCATION" \
+    --no-wait --only-show-errors -o none
+else
+  echo "Environment already exists (state: $STATE)"
+fi
+
+if [ "$STATE" != "Succeeded" ]; then
+  printf "Waiting for the environment"
+  for _ in $(seq 1 90); do          # up to ~15 minutes
+    STATE="$(env_state)"
+    case "$STATE" in
+      Succeeded) break ;;
+      Failed|Canceled)
+        echo
+        echo "Environment provisioning reported: $STATE"
+        echo "  az containerapp env show -n $ENVIRONMENT -g $RESOURCE_GROUP"
+        exit 1 ;;
+      *) printf "." ;;              # in progress, not visible yet, or a network blip
+    esac
+    sleep 10
+  done
+  echo
+  if [ "$STATE" != "Succeeded" ]; then
+    echo "The environment did not reach Succeeded in time (last state: ${STATE:-unknown})."
+    echo "It may still be provisioning - re-run this script, it picks up where it left off."
+    exit 1
+  fi
+  echo "Environment ready."
+fi
+
+echo
 echo "Building in Azure and deploying (first run takes a few minutes)..."
+echo "If this drops out on a network error, just run the script again - every"
+echo "step is idempotent and it will resume from here."
 echo
 
 # `az containerapp up` is not a normal command: it rejects the global
