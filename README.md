@@ -339,6 +339,10 @@ judgement inside them is not. If your point is "watch the orchestration work",
 offline is honest and repeatable. If your point is "watch the *agent decide*",
 run it live.
 
+**`AZURE_OPENAI_DEPLOYMENT` is the deployment name, not the model name** — the
+left-hand column in the Foundry portal's Model deployments list. A deployment
+called `chat-model` running gpt-4o is `chat-model`.
+
 To run live, supply the settings and the deploy script does the rest — the key
 goes in as a Container Apps secret, never a plain environment value:
 

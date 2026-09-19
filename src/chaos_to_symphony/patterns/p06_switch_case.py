@@ -30,7 +30,7 @@ from agent_framework import (
 from pydantic import BaseModel
 from typing_extensions import Never
 
-from ..base import DiagramEdge, DiagramNode, PatternSpec
+from ..base import DiagramEdge, DiagramNode, PatternSpec, parse_structured
 from ..clients import chat_client
 from ..memory import STORE
 
@@ -73,7 +73,7 @@ async def intake(case_text: str, ctx: WorkflowContext[AgentExecutorRequest]) -> 
 @executor(id="to_routed")
 async def to_routed(response: AgentExecutorResponse, ctx: WorkflowContext[Routed]) -> None:
     """Validate the classifier's JSON, then emit the typed payload the switch reads."""
-    parsed = Triage.model_validate_json(response.agent_response.text)
+    parsed = parse_structured(Triage, response.agent_response.text)
     await ctx.send_message(Routed(parsed.severity, parsed.exception_kind, parsed.reason))
 
 

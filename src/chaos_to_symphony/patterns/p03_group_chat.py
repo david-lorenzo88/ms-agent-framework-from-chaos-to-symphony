@@ -9,6 +9,8 @@ other, and that is exactly why it needs the tightest termination rules.
 
 from __future__ import annotations
 
+import re
+
 from agent_framework import Agent, Message
 from agent_framework.orchestrations import GroupChatBuilder, GroupChatState
 
@@ -36,13 +38,24 @@ def committee_selector(state: GroupChatState) -> str:
     return names[1 + ((state.current_round - 1) % (len(names) - 1))]
 
 
+#: A money figure: "EUR 8,000", "8000 EUR", "8.000 euros" or a bare symbol.
+_AMOUNT = re.compile(r"(?:eur|euros?|\u20ac)\s*[\d][\d.,]*|[\d][\d.,]*\s*(?:eur|euros?|\u20ac)", re.IGNORECASE)
+
+
 def settled(conversation: list[Message]) -> bool:
-    """Stop early once the chair has recorded a settlement figure."""
+    """Stop early once a settlement figure has actually been stated.
+
+    Deliberately looks for a *number with a currency on it* rather than for the
+    word "settle". The scripted client is predictable, but a real model will
+    write "I propose a goodwill payment of EUR 8,000" or use a symbol, and a
+    condition keyed on particular English words would simply never fire -
+    leaving max_rounds as the only thing ending the conversation, which is the
+    failure this pattern's own slide warns about.
+    """
     if not conversation:
         return False
-    last = conversation[-1]
-    text = (getattr(last, "text", "") or "").lower()
-    return "settle" in text and "eur" in text
+    text = getattr(conversation[-1], "text", "") or ""
+    return bool(_AMOUNT.search(text))
 
 
 def build():

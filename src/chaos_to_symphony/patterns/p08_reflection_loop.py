@@ -27,7 +27,7 @@ from agent_framework import (
 )
 from pydantic import BaseModel
 
-from ..base import DiagramEdge, DiagramNode, PatternSpec
+from ..base import DiagramEdge, DiagramNode, PatternSpec, parse_structured
 from ..clients import chat_client
 from ..memory import STORE
 
@@ -91,7 +91,7 @@ async def judge(response: AgentExecutorResponse, ctx: WorkflowContext[AgentExecu
     whose exit depends only on the reviewer agreeing is an approval loop that
     can run until the budget is gone.
     """
-    verdict = Verdict.model_validate_json(response.agent_response.text)
+    verdict = parse_structured(Verdict, response.agent_response.text)
     draft: Draft = ctx.get_state(DRAFT_KEY)
     revision: int = ctx.get_state(ROUND_KEY) or 1
     STORE.record("reflection:reviewer", verdict.decision, f"revision {revision}", pattern="reflection-loop")

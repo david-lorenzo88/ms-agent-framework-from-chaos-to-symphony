@@ -9,9 +9,46 @@ described in exactly one place.
 
 from __future__ import annotations
 
+import re
 from collections.abc import Callable
 from dataclasses import dataclass, field
-from typing import Any
+from typing import Any, TypeVar
+
+from pydantic import BaseModel
+
+ModelT = TypeVar("ModelT", bound=BaseModel)
+
+_FENCE = re.compile(r"```(?:json)?\s*(.*?)\s*```", re.DOTALL)
+
+
+def parse_structured(model: type[ModelT], text: str) -> ModelT:
+    """Validate a model's reply against a schema, tolerating how models write.
+
+    ``response_format`` asks for clean JSON and the offline client obliges
+    exactly. A real model mostly does too - but not always: it may wrap the
+    object in a markdown fence, or put a sentence in front of it. Failing to
+    parse kills the run, and "the model added a code fence" is a poor reason
+    for a demo to die on stage, so try the strict form first and fall back to
+    finding the JSON object inside the text.
+    """
+    candidates = [text]
+    fenced = _FENCE.search(text)
+    if fenced:
+        candidates.append(fenced.group(1))
+    # Outermost braces: handles a leading "Here is the result:".
+    start, end = text.find("{"), text.rfind("}")
+    if start != -1 and end > start:
+        candidates.append(text[start : end + 1])
+
+    last: Exception | None = None
+    for candidate in candidates:
+        try:
+            return model.model_validate_json(candidate)
+        except Exception as exc:  # pragma: no cover - depends on the model
+            last = exc
+    raise ValueError(
+        f"Could not parse a {model.__name__} from the model's reply: {text[:200]!r}"
+    ) from last
 
 
 @dataclass(frozen=True, slots=True)
