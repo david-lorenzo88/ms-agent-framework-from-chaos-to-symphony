@@ -130,6 +130,7 @@ SPEC = PatternSpec(
         DiagramEdge("human", "gate", "approve / edit", "dashed"),
         DiagramEdge("gate", "letter", "resume"),
     ),
+    devui_name="HumanInTheLoop",
     build=build,
     new_this_year=True,
 )

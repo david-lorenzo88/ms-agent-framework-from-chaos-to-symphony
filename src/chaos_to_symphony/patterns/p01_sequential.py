@@ -100,5 +100,6 @@ SPEC = PatternSpec(
         DiagramEdge("customs", "writer", "+ classification"),
         DiagramEdge("writer", "out", "draft"),
     ),
+    devui_name="Sequential",
     build=build,
 )

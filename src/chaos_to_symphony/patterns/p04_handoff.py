@@ -142,5 +142,6 @@ SPEC = PatternSpec(
         DiagramEdge("compliance", "triage", "return", "dashed"),
         DiagramEdge("customs", "triage", "return", "dashed"),
     ),
+    devui_name="Handoff",
     build=build,
 )

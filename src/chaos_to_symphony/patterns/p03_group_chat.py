@@ -143,5 +143,6 @@ SPEC = PatternSpec(
         DiagramEdge("acct", "thread", ""),
         DiagramEdge("thread", "chair", "next speaker?", "loop"),
     ),
+    devui_name="GroupChat",
     build=build,
 )

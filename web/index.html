@@ -1,0 +1,144 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>From Chaos to Symphony — Agent Framework orchestration patterns</title>
+<meta name="description" content="Twelve Microsoft Agent Framework orchestration patterns, running live with DevUI. Baltic Summit 2026.">
+<link rel="icon" href="assets/baltic-summit-mark.svg" type="image/svg+xml">
+<link rel="stylesheet" href="styles.css">
+</head>
+<body>
+
+<header class="topbar">
+  <div class="brand">
+    <img src="assets/baltic-summit-logo.svg" alt="Baltic Summit" class="brand-logo">
+    <div class="brand-meta">
+      <h1>From Chaos to Symphony</h1>
+      <p>Orchestrating agents with Microsoft Agent Framework · David Lorenzo &amp; Samir Makwana</p>
+    </div>
+  </div>
+  <div class="topbar-status">
+    <span class="pill" id="providerPill" title="Which chat client the demos are using">provider …</span>
+    <a class="pill pill-link" id="devuiLink" href="#" target="_blank" rel="noopener">DevUI</a>
+  </div>
+</header>
+
+<main class="shell">
+
+  <!-- ─── pattern rail ─────────────────────────────────────────── -->
+  <nav class="rail" id="rail" aria-label="Orchestration patterns">
+    <div class="rail-head">
+      <span class="rail-title">Patterns</span>
+      <span class="rail-count" id="railCount"></span>
+    </div>
+    <div id="railGroups"></div>
+    <footer class="rail-foot">
+      <span class="dot dot-new"></span> new since the 2025 edition
+    </footer>
+  </nav>
+
+  <!-- ─── detail ───────────────────────────────────────────────── -->
+  <section class="detail" id="detail">
+
+    <article class="card card-intro">
+      <div class="intro-head">
+        <span class="num" id="pNumber">01</span>
+        <div>
+          <h2 id="pName">…</h2>
+          <p class="tagline" id="pTagline"></p>
+        </div>
+        <span class="badge" id="pTier"></span>
+      </div>
+      <p class="summary" id="pSummary"></p>
+
+      <div class="grid-two">
+        <div class="mini mini-use">
+          <h3>Use when</h3>
+          <ul id="pUse"></ul>
+        </div>
+        <div class="mini mini-avoid">
+          <h3>Avoid when</h3>
+          <ul id="pAvoid"></ul>
+        </div>
+      </div>
+
+      <div class="mini mini-fail">
+        <h3>How it fails in production</h3>
+        <p id="pFail"></p>
+      </div>
+
+      <div class="api">
+        <h3>Agent Framework API</h3>
+        <ul id="pApi"></ul>
+      </div>
+    </article>
+
+    <article class="card card-diagram">
+      <header class="card-head">
+        <h3>Interaction diagram</h3>
+        <span class="hint" id="diagramHint">nodes light up as the workflow runs</span>
+      </header>
+      <div class="diagram-wrap"><svg id="diagram" role="img" aria-label="Agent interaction diagram"></svg></div>
+      <p class="scenario"><strong>Scenario</strong> <span id="pScenario"></span></p>
+    </article>
+
+    <article class="card card-run">
+      <header class="card-head">
+        <h3>Run it</h3>
+        <span class="hint" id="runState">idle</span>
+      </header>
+      <div class="run-controls">
+        <textarea id="prompt" rows="2" spellcheck="false" aria-label="Prompt"></textarea>
+        <div class="run-buttons">
+          <button id="runBtn" class="btn btn-primary">Run pattern</button>
+          <button id="resetBtn" class="btn">Reset data</button>
+        </div>
+      </div>
+
+      <div class="tabs" role="tablist">
+        <button class="tab is-on" data-tab="log"   role="tab">Live log</button>
+        <button class="tab"       data-tab="devui" role="tab">DevUI</button>
+        <button class="tab"       data-tab="audit" role="tab">Audit trail</button>
+        <button class="tab"       data-tab="store" role="tab">In-memory store</button>
+      </div>
+
+      <div class="panel is-on" id="panel-log"><div class="console" id="console"><p class="console-empty">Press <strong>Run pattern</strong> to stream this workflow's events.</p></div></div>
+
+      <div class="panel" id="panel-devui">
+        <div class="devui-bar">
+          <span id="devuiState">checking DevUI…</span>
+          <a id="devuiOpen" class="btn btn-small" target="_blank" rel="noopener" href="#">Open in a tab</a>
+        </div>
+        <iframe id="devuiFrame" title="Agent Framework DevUI" loading="lazy"></iframe>
+      </div>
+
+      <div class="panel" id="panel-audit"><table class="grid" id="auditTable"><thead><tr><th>Time</th><th>Actor</th><th>Action</th><th>Detail</th></tr></thead><tbody></tbody></table></div>
+
+      <div class="panel" id="panel-store">
+        <p class="store-note" id="storeNote"></p>
+        <table class="grid" id="storeTable"><thead><tr><th>Shipment</th><th>Lane</th><th>Goods</th><th>Exception</th><th>Severity</th><th class="right">Value</th></tr></thead><tbody></tbody></table>
+      </div>
+    </article>
+
+  </section>
+</main>
+
+<!-- ─── approval modal (human-in-the-loop) ─────────────────────── -->
+<div class="modal-backdrop" id="approvalModal" hidden>
+  <div class="modal" role="dialog" aria-modal="true" aria-labelledby="approvalTitle">
+    <h3 id="approvalTitle">The workflow has suspended</h3>
+    <p class="modal-sub">It will not continue until you decide. This is <code>request_info</code>, not a callback.</p>
+    <dl class="modal-facts" id="approvalFacts"></dl>
+    <pre class="modal-proposal" id="approvalProposal"></pre>
+    <div class="modal-actions">
+      <button class="btn btn-primary" id="approveBtn">Approve</button>
+      <button class="btn btn-danger" id="rejectBtn">Send back</button>
+      <span class="modal-timer" id="approvalTimer"></span>
+    </div>
+  </div>
+</div>
+
+<script src="app.js"></script>
+</body>
+</html>

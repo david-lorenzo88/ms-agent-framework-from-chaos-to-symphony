@@ -192,6 +192,7 @@ SPEC = PatternSpec(
         DiagramEdge("routed", "std", "medium"),
         DiagramEdge("routed", "watch", "Default", "dashed"),
     ),
+    devui_name="SwitchCase",
     build=build,
     new_this_year=True,
 )

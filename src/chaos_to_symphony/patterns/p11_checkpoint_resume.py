@@ -159,6 +159,7 @@ SPEC = PatternSpec(
         DiagramEdge("store", "new", "resume by id", "loop"),
         DiagramEdge("new", "s3", "continues"),
     ),
+    devui_name="CheckpointResume",
     build=build,
     demo=demo,
     new_this_year=True,

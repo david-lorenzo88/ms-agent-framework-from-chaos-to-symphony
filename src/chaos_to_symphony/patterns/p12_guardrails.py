@@ -245,6 +245,7 @@ SPEC = PatternSpec(
         DiagramEdge("slow", "to", "no reply"),
         DiagramEdge("to", "out", "abandon + flag", "dashed"),
     ),
+    devui_name="Guardrails",
     build=build,
     demo=demo,
     new_this_year=True,

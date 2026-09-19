@@ -128,6 +128,7 @@ SPEC = PatternSpec(
         DiagramEdge("cost", "mgr", "result", "dashed"),
         DiagramEdge("ledger", "mgr", "re-plan", "loop"),
     ),
+    devui_name="Magentic",
     build=build,
     new_this_year=False,
 )

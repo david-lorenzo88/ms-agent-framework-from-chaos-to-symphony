@@ -219,6 +219,7 @@ SPEC = PatternSpec(
         DiagramEdge("judge", "writer", "revise (max 3)", "loop"),
         DiagramEdge("judge", "out", "approve | escalate"),
     ),
+    devui_name="ReflectionLoop",
     build=build,
     new_this_year=True,
 )

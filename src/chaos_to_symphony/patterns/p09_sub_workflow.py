@@ -205,6 +205,7 @@ SPEC = PatternSpec(
         DiagramEdge("branch", "claims", "cleared"),
         DiagramEdge("claims", "out", "settlement"),
     ),
+    devui_name="SubWorkflow",
     build=build,
     new_this_year=True,
 )

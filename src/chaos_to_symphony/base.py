@@ -61,6 +61,13 @@ class PatternSpec:
     more than once - stop it, inspect it, restart it - so they supply an async
     callable returning narration lines instead of relying on the generic runner.
     """
+    devui_name: str = ""
+    """The Workflow name DevUI registers this pattern under.
+
+    DevUI mints ``{type}_{source}_{name}_{uuid}`` entity ids at start-up, so the
+    uuid cannot be known ahead of time. The website resolves an id by matching
+    this name against DevUI's /v1/entities listing.
+    """
     new_this_year: bool = False
     """True for material that did not exist in the 2025 edition of this talk."""
 
@@ -80,6 +87,8 @@ class PatternSpec:
             "scenario": self.scenario,
             "defaultPrompt": self.default_prompt,
             "newThisYear": self.new_this_year,
+            "devuiName": self.devui_name,
+            "hasCustomRunner": self.demo is not None,
             "diagram": {
                 "nodes": [{"id": n.id, "label": n.label, "kind": n.kind} for n in self.nodes],
                 "edges": [

@@ -1,0 +1,215 @@
+"""Drives one pattern run and turns Agent Framework events into a live feed.
+
+The showcase site needs three things from a run that the framework emits as one
+event stream: log lines, which diagram node is busy, and any pause waiting on a
+human. This module does that translation and nothing else, so the pattern
+modules stay free of presentation concerns.
+"""
+
+from __future__ import annotations
+
+import asyncio
+import contextlib
+import time
+import uuid
+from dataclasses import dataclass, field
+from typing import Any
+
+from .base import PatternSpec
+from .memory import STORE
+from .scripted import reset_context
+
+#: How long a human-in-the-loop pause waits for a click before it approves
+#: itself. A demo that hangs forever because nobody pressed the button is worse
+#: than one that visibly auto-approves and says so.
+APPROVAL_TIMEOUT_SECONDS = 90
+
+
+@dataclass
+class RunSession:
+    """One execution of one pattern, streamed to one or more browsers."""
+
+    run_id: str
+    spec: PatternSpec
+    prompt: str
+    queue: asyncio.Queue[dict[str, Any]] = field(default_factory=asyncio.Queue)
+    approvals: dict[str, asyncio.Future[str]] = field(default_factory=dict)
+    started_at: float = field(default_factory=time.time)
+    done: bool = False
+    task: asyncio.Task[None] | None = None
+
+    # -- emit helpers ------------------------------------------------------
+
+    def emit(self, kind: str, **payload: Any) -> None:
+        """Push one frame to the browser."""
+        self.queue.put_nowait({"kind": kind, "t": round(time.time() - self.started_at, 2), **payload})
+
+    def log(self, level: str, source: str, message: str) -> None:
+        self.emit("log", level=level, source=source, message=message)
+
+    def activate(self, node_id: str, state: str = "active") -> None:
+        self.emit("node", node=node_id, state=state)
+
+    # -- diagram mapping ---------------------------------------------------
+
+    def node_for(self, executor_id: str) -> str | None:
+        """Best-effort map from a framework executor id to a diagram node.
+
+        Diagram nodes are authored for the audience, so their ids are short
+        ('customs') while the framework's are full agent names
+        ('customs-specialist'). Match on label first, then on containment.
+        """
+        if not executor_id:
+            return None
+        lowered = executor_id.lower()
+        for node in self.spec.nodes:
+            if node.label.lower() == lowered:
+                return node.id
+        for node in self.spec.nodes:
+            if node.id.lower() in lowered or lowered in node.label.lower():
+                return node.id
+        return None
+
+    # -- approval ----------------------------------------------------------
+
+    def answer(self, request_id: str, decision: str) -> bool:
+        """Resolve a pending approval from the browser. Returns False if unknown."""
+        future = self.approvals.get(request_id)
+        if future is None or future.done():
+            return False
+        future.set_result(decision)
+        return True
+
+
+async def _drive_workflow(session: RunSession) -> None:
+    """Run a workflow with streaming, translating events as they arrive."""
+    from agent_framework.orchestrations import AgentRequestInfoResponse
+
+    workflow = session.spec.build()
+    stream = workflow.run(session.prompt, stream=True)
+    responses: dict[str, Any] | None = None
+
+    while True:
+        pending: dict[str, Any] = {}
+        async for event in stream:
+            kind = getattr(event, "type", "")
+            executor_id = getattr(event, "executor_id", "") or ""
+            node = session.node_for(executor_id)
+
+            if kind == "executor_invoked":
+                if node:
+                    session.activate(node, "active")
+                session.log("info", executor_id or "workflow", "invoked")
+
+            elif kind == "executor_completed":
+                if node:
+                    session.activate(node, "done")
+                session.log("info", executor_id or "workflow", "completed")
+
+            elif kind == "agent_run_update":
+                text = _text_of(getattr(event, "data", None))
+                if text:
+                    session.emit("token", source=executor_id or "agent", text=text)
+
+            elif kind == "output":
+                text = _text_of(getattr(event, "data", None))
+                if text.strip():
+                    session.emit("output", source=executor_id or "workflow", text=text)
+
+            elif kind == "request_info":
+                request_id = getattr(event, "request_id", "") or str(uuid.uuid4())
+                decision = await _ask_human(session, request_id, event)
+                pending[request_id] = (
+                    AgentRequestInfoResponse.approve()
+                    if decision == "approve"
+                    else AgentRequestInfoResponse.from_strings(
+                        ["Rejected by the duty manager. Re-price at or below the approval threshold."]
+                    )
+                )
+
+            elif kind == "error":
+                session.log("error", executor_id or "workflow", str(getattr(event, "data", "")))
+
+        if not pending:
+            break
+        session.log("info", "workflow", f"resuming with {len(pending)} human response(s)")
+        responses = pending
+        stream = workflow.run(stream=True, responses=responses)
+
+
+async def _ask_human(session: RunSession, request_id: str, event: Any) -> str:
+    """Suspend the run and wait for a click, or auto-approve after a timeout."""
+    from .patterns.p10_human_in_the_loop import approval_context
+
+    future: asyncio.Future[str] = asyncio.get_running_loop().create_future()
+    session.approvals[request_id] = future
+    session.emit(
+        "approval",
+        requestId=request_id,
+        proposal=_text_of(getattr(event, "data", None))[:800],
+        context=approval_context(session.prompt),
+        timeoutSeconds=APPROVAL_TIMEOUT_SECONDS,
+    )
+    session.log("warn", "request_info", "workflow SUSPENDED - waiting on a human decision")
+    try:
+        decision = await asyncio.wait_for(future, timeout=APPROVAL_TIMEOUT_SECONDS)
+        session.log("info", "request_info", f"human decided: {decision}")
+    except asyncio.TimeoutError:
+        decision = "approve"
+        session.log("warn", "request_info", "no answer in time - auto-approved so the demo can continue")
+    session.emit("approvalResolved", requestId=request_id, decision=decision)
+    return decision
+
+
+def _text_of(data: Any) -> str:
+    """Pull displayable text out of whatever an event carried."""
+    if data is None:
+        return ""
+    for attribute in ("text", "message"):
+        value = getattr(data, attribute, None)
+        if isinstance(value, str) and value:
+            return value
+    response = getattr(data, "agent_response", None)
+    if response is not None:
+        value = getattr(response, "text", None)
+        if isinstance(value, str):
+            return value
+    return str(data)
+
+
+async def execute(session: RunSession) -> None:
+    """Run one pattern to completion, however that pattern needs to be run."""
+    reset_context()
+    STORE.reset()
+    session.log("info", "runner", f"provider={_provider()}  pattern={session.spec.slug}")
+    session.emit("start", pattern=session.spec.slug, prompt=session.prompt)
+    try:
+        if session.spec.demo is not None:
+            # Checkpoint-resume and guardrails drive the workflow more than
+            # once, so they narrate themselves.
+            session.log("info", "runner", "pattern supplies its own runner")
+            for line in await session.spec.demo(session.prompt):
+                session.emit("output", source=session.spec.slug, text=line)
+        else:
+            await _drive_workflow(session)
+        session.log("info", "runner", "run complete")
+    except Exception as exc:
+        session.log("error", "runner", f"{type(exc).__name__}: {exc}")
+    finally:
+        session.emit("audit", rows=STORE.audit_dicts())
+        session.emit("end")
+        session.done = True
+
+
+def _provider() -> str:
+    from .clients import provider
+
+    return provider()
+
+
+async def cancel(session: RunSession) -> None:
+    """Stop a run that is still going."""
+    if session.task and not session.task.done():
+        session.task.cancel()
+        with contextlib.suppress(asyncio.CancelledError):
+            await session.task

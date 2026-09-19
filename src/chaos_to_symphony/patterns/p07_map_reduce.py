@@ -220,6 +220,7 @@ SPEC = PatternSpec(
         DiagramEdge("rel", "red", "reduce"),
         DiagramEdge("red", "nar", "ranked list"),
     ),
+    devui_name="MapReduce",
     build=build,
     new_this_year=True,
 )

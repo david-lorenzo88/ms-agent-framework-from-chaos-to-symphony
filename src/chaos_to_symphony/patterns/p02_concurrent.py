@@ -102,5 +102,6 @@ SPEC = PatternSpec(
         DiagramEdge("legal", "agg", "fan-in"),
         DiagramEdge("ops", "agg", "fan-in"),
     ),
+    devui_name="Concurrent",
     build=build,
 )
