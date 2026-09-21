@@ -10,6 +10,11 @@ view of the run, not a view this repo invented.
 Auth is disabled by default here so the showcase site can embed DevUI in an
 iframe. That is a local-demo decision; DevUI ships auth-enabled and is a sample
 app, not a production surface. Set CHAOS_DEVUI_AUTH=1 to put the token back.
+
+Every pattern is also made to take a prompt rather than a structured message -
+see ``devui_input`` for why eight of the twelve would otherwise ask for a
+``role`` and a ``contents`` array. Set CHAOS_DEVUI_PROMPT_INPUT=0 for DevUI's
+own behaviour.
 """
 
 from __future__ import annotations
@@ -19,6 +24,7 @@ import os
 
 from dotenv import load_dotenv
 
+from . import devui_input
 from .clients import is_offline, provider
 from .registry import PATTERNS
 
@@ -46,6 +52,10 @@ def main() -> None:
 
     from agent_framework.devui import serve
 
+    # Before serve(), because DevUI resolves a workflow's input type on the
+    # first /v1/entities/{id}/info request.
+    prompt_input = os.getenv("CHAOS_DEVUI_PROMPT_INPUT", "1") == "1" and devui_input.install()
+
     port = int(os.getenv("DEVUI_PORT", "8080"))
     showcase_port = os.getenv("SHOWCASE_PORT", "8000")
     auth = os.getenv("CHAOS_DEVUI_AUTH", "0") == "1"
@@ -55,6 +65,7 @@ def main() -> None:
     print("  From Chaos to Symphony - Baltic Summit 2026")
     print(f"  {len(workflows)} pattern workflows registered with DevUI")
     print(f"  Provider: {provider()}" + ("  (offline - no keys, no network)" if is_offline() else ""))
+    print("  Input:    " + ("a prompt, on every pattern" if prompt_input else "DevUI's own per-workflow forms"))
     print(f"  DevUI:    http://localhost:{port}")
     print(f"  Showcase: http://localhost:{showcase_port}")
     print()

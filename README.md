@@ -76,6 +76,24 @@ make demo           # runs both servers
   site embeds it per pattern so you can drive a workflow through the
   framework's own tooling.
 
+### Typing a prompt into DevUI
+
+Every pattern in DevUI takes the same thing the showcase site's *Run it* box
+takes: a sentence. Out of the box eight of them do not. DevUI builds a
+workflow's input control from whatever type its *start* executor declares, and
+`SequentialBuilder` and the other four orchestration builders put an adapter in
+front that accepts `Message` as well as `str`. DevUI prefers the `Message`, and
+its frontend then fails to recognise it as a chat message — it looks for a
+`text` field and the framework's `Message` carries `contents` — so instead of a
+text box you get *Configure Workflow Inputs* asking for `role`, `contents`,
+`author_name` and `message_id` before the workflow will run.
+
+`devui_input.py` tells DevUI to pick `str` whenever the start executor accepts
+one, which all twelve do. Same workflows, same dispatch, one text box
+everywhere. Set `CHAOS_DEVUI_PROMPT_INPUT=0` to see DevUI's own behaviour —
+useful if you want to show the difference, and the escape hatch if a future
+DevUI build changes the internals this leans on.
+
 ### Traces, and what DevUI can and cannot show
 
 The **Traces** tab is the framework's own view of the run you just did: the
@@ -194,6 +212,7 @@ src/chaos_to_symphony/
   runner.py       drives a run, translates events into a live feed
   api.py          showcase backend (FastAPI + server-sent events)
   devui_app.py    registers all twelve workflows with DevUI
+  devui_input.py  makes DevUI ask for a prompt, not a Message form
   patterns/       one module per pattern, p01…p12
 web/              the showcase site: no framework, no CDN, no build step
 deck/             the session deck and the script that builds it
