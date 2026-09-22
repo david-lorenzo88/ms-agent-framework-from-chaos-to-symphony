@@ -76,6 +76,57 @@ make demo           # runs both servers
   site embeds it per pattern so you can drive a workflow through the
   framework's own tooling.
 
+### Send back, on the approval gate
+
+Pattern 10 suspends and asks a human. **Send back** is not a decline — it hands
+the gated agent a message, which re-runs it and suspends again on the new
+proposal, where **Approve** passes the proposal through untouched. Both answers
+go back through `run(responses=...)`; the difference is only whether the
+response carries any messages.
+
+That means a send-back is only visible if the proposal actually changes. The
+offline settlement agent therefore re-prices: it opens at a tenth of the
+declared value capped by the goodwill ceiling, and concedes on each send-back
+down to the customer's approval threshold, quoting what it came down from. The
+modal names the round, because the gate reopening within a second of a click
+otherwise reads as a button that did nothing.
+
+### Patterns that finish more than one way
+
+Four of the twelve branch, and which branch you get is decided by the case you
+type, not by the pattern. Conditional routing has three terminal desks,
+sub-workflow composition either holds a consignment at the gate or passes it
+through, the reflection loop either gets an approval or hits its revision
+ceiling, and handoff routes to one of four specialists.
+
+Those patterns show an **endings box** under the *Run it* prompt: one prompt per
+ending, each naming where it lands and the fact in the case that sends it there.
+Click one to load it. The other eight patterns finish one way whatever you type,
+so the box stays hidden rather than implying a choice that is not there.
+
+The prompts are checked, not asserted — `make smoke` runs every one of them and
+fails if it no longer reaches the ending it advertises. Case data, routing rules
+and the offline client all have to agree for the claim to hold, and none of them
+knows the promise exists.
+
+### Typing a prompt into DevUI
+
+Every pattern in DevUI takes the same thing the showcase site's *Run it* box
+takes: a sentence. Out of the box eight of them do not. DevUI builds a
+workflow's input control from whatever type its *start* executor declares, and
+`SequentialBuilder` and the other four orchestration builders put an adapter in
+front that accepts `Message` as well as `str`. DevUI prefers the `Message`, and
+its frontend then fails to recognise it as a chat message — it looks for a
+`text` field and the framework's `Message` carries `contents` — so instead of a
+text box you get *Configure Workflow Inputs* asking for `role`, `contents`,
+`author_name` and `message_id` before the workflow will run.
+
+`devui_input.py` tells DevUI to pick `str` whenever the start executor accepts
+one, which all twelve do. Same workflows, same dispatch, one text box
+everywhere. Set `CHAOS_DEVUI_PROMPT_INPUT=0` to see DevUI's own behaviour —
+useful if you want to show the difference, and the escape hatch if a future
+DevUI build changes the internals this leans on.
+
 ### Traces, and what DevUI can and cannot show
 
 The **Traces** tab is the framework's own view of the run you just did: the
@@ -194,6 +245,7 @@ src/chaos_to_symphony/
   runner.py       drives a run, translates events into a live feed
   api.py          showcase backend (FastAPI + server-sent events)
   devui_app.py    registers all twelve workflows with DevUI
+  devui_input.py  makes DevUI ask for a prompt, not a Message form
   patterns/       one module per pattern, p01…p12
 web/              the showcase site: no framework, no CDN, no build step
 deck/             the session deck and the script that builds it

@@ -18,7 +18,7 @@ from typing import Any
 from . import telemetry
 from .base import PatternSpec
 from .memory import STORE
-from .scripted import reset_context
+from .scripted import SEND_BACK_INSTRUCTION, reset_context
 
 #: How long a human-in-the-loop pause waits for a click before it approves
 #: itself. A demo that hangs forever because nobody pressed the button is worse
@@ -152,13 +152,15 @@ async def _drive_workflow(session: RunSession) -> None:
                     )
                 else:
                     decision = await _ask_human(session, request_id, event)
-                    pending[request_id] = (
-                        AgentRequestInfoResponse.approve()
-                        if decision == "approve"
-                        else AgentRequestInfoResponse.from_strings(
-                            ["Rejected by the duty manager. Re-price at or below the approval threshold."]
-                        )
-                    )
+                    if decision == "approve":
+                        pending[request_id] = AgentRequestInfoResponse.approve()
+                    else:
+                        # An empty response approves, so a send-back has to carry
+                        # a message: that is what sends the proposal back round
+                        # the gated agent instead of past it.
+                        session.log("warn", "request_info",
+                                    "sent back - the settlement agent re-prices and the gate asks again")
+                        pending[request_id] = AgentRequestInfoResponse.from_strings([SEND_BACK_INSTRUCTION])
 
             elif kind == "error":
                 session.log("error", executor_id or "workflow", str(getattr(event, "data", "")))

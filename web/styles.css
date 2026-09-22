@@ -369,6 +369,32 @@ code { font-family: var(--mono); font-size: .88em; }
 .panel .grid { display: block; max-height: 360px; overflow-y: auto; }
 .store-note { font-size: .79rem; color: var(--ink-faint); margin: 0 0 .6rem; }
 
+/* ── endings: one prompt per way the pattern can finish ──────── */
+
+.endings {
+  margin-top: .8rem; padding: .7rem .85rem;
+  border: 1px solid var(--line); border-radius: var(--radius-sm); background: #F7FAFD;
+}
+.endings[hidden] { display: none; }
+.endings-head { margin: 0 0 .55rem; font-size: .78rem; color: var(--ink-soft); }
+.endings-list { list-style: none; margin: 0; padding: 0; display: grid; gap: .4rem; }
+
+.ending-btn {
+  width: 100%; text-align: left; cursor: pointer;
+  padding: .5rem .65rem; border: 1px solid var(--line); border-radius: var(--radius-sm);
+  background: var(--paper); font: inherit; color: var(--ink);
+}
+.ending-btn:hover  { border-color: var(--steel); background: #EEF4FA; }
+.ending-btn:focus-visible { outline: 2px solid var(--navy-soft); outline-offset: 1px; }
+
+.ending-name {
+  display: inline-block; margin-bottom: .2rem;
+  font-family: var(--mono); font-size: .72rem; font-weight: 700;
+  color: var(--navy); letter-spacing: .02em;
+}
+.ending-prompt { display: block; font-size: .8rem; color: var(--ink); }
+.ending-why    { display: block; margin-top: .18rem; font-size: .73rem; color: var(--ink-faint); }
+
 /* ── approval modal ──────────────────────────────────────────── */
 
 .modal-backdrop {
@@ -384,6 +410,12 @@ code { font-family: var(--mono); font-size: .88em; }
 }
 .modal h3 { font-size: 1.15rem; }
 .modal-sub { margin: .35rem 0 1rem; font-size: .84rem; color: var(--ink-soft); }
+.modal-round {
+  margin: -.5rem 0 1rem; padding: .45rem .7rem; border-radius: var(--radius-sm);
+  background: #FFF6E6; border-left: 3px solid var(--amber-warm);
+  font-size: .8rem; color: var(--navy); font-weight: 600;
+}
+.modal-round[hidden] { display: none; }
 .modal-facts {
   display: grid; grid-template-columns: auto 1fr; gap: .3rem 1rem;
   margin: 0 0 1rem; font-size: .83rem;

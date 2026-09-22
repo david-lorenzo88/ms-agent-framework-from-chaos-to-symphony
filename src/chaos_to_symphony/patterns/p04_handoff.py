@@ -13,7 +13,7 @@ from __future__ import annotations
 from agent_framework import Agent, Message
 from agent_framework.orchestrations import HandoffBuilder
 
-from ..base import DiagramEdge, DiagramNode, PatternSpec
+from ..base import DiagramEdge, DiagramNode, PatternSpec, PromptExample
 from ..clients import chat_client
 from ..tools import CASE_TOOLS, CUSTOMS_TOOLS
 
@@ -165,6 +165,28 @@ SPEC = PatternSpec(
         DiagramEdge("triage", "ops", "handoff_to_ops"),
         DiagramEdge("compliance", "triage", "return", "dashed"),
         DiagramEdge("customs", "triage", "return", "dashed"),
+    ),
+    prompt_examples=(
+        PromptExample(
+            ending="customs-specialist",
+            prompt="Exception on BFG-24084. Route it to whoever owns it and resolve it.",
+            why="A customs hold on a consignee who is clear of screening. Routing is by exception kind.",
+        ),
+        PromptExample(
+            ending="compliance-specialist",
+            prompt="Exception on BFG-24086. Route it to whoever owns it and resolve it.",
+            why="Also a customs hold - but this consignee fails sanctions screening, and that outranks the kind.",
+        ),
+        PromptExample(
+            ending="claims-specialist",
+            prompt="Exception on BFG-24085. Route it to whoever owns it and resolve it.",
+            why="Damage in transit. Claims owns damage, temperature excursions and losses.",
+        ),
+        PromptExample(
+            ending="ops-specialist",
+            prompt="Exception on BFG-24093. Route it to whoever owns it and resolve it.",
+            why="A delay. Ops owns recovery, and no specialist hands it back.",
+        ),
     ),
     devui_name="Handoff",
     build=build,

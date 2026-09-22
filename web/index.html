@@ -96,6 +96,12 @@
         </div>
       </div>
 
+      <!-- Prompts that each drive a different ending. Only branching patterns have them. -->
+      <div class="endings" id="endings" hidden>
+        <p class="endings-head">This pattern can finish more than one way. Pick a prompt to load it:</p>
+        <ul class="endings-list" id="endingsList"></ul>
+      </div>
+
       <div class="tabs" role="tablist">
         <button class="tab is-on" data-tab="log"   role="tab">Live log</button>
         <button class="tab"       data-tab="traces" role="tab">Traces</button>
@@ -145,6 +151,7 @@
   <div class="modal" role="dialog" aria-modal="true" aria-labelledby="approvalTitle">
     <h3 id="approvalTitle">The workflow has suspended</h3>
     <p class="modal-sub">It will not continue until you decide. This is <code>request_info</code>, not a callback.</p>
+    <p class="modal-round" id="approvalRound" hidden></p>
     <dl class="modal-facts" id="approvalFacts"></dl>
     <pre class="modal-proposal" id="approvalProposal"></pre>
     <div class="modal-actions">

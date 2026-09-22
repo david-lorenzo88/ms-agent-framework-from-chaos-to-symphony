@@ -71,6 +71,26 @@ class DiagramEdge:
 
 
 @dataclass(frozen=True, slots=True)
+class PromptExample:
+    """One prompt, and the ending it drives.
+
+    A pattern that branches has more than one way to finish, and which one you
+    get is decided by the case you hand it, not by the pattern. On stage that
+    is the difference between asserting that a Default branch exists and
+    showing it fire - so each example names its ending and the fact in the case
+    that sends it there. ``scripts/smoke.py`` runs them and checks the endings
+    still match, because a prompt whose stated ending has quietly drifted is
+    worse on stage than no example at all.
+    """
+
+    ending: str
+    """How the run finishes, in the words the run itself prints."""
+    prompt: str
+    why: str = ""
+    """The fact in the case that decides it."""
+
+
+@dataclass(frozen=True, slots=True)
 class PatternSpec:
     """Everything the session needs to know about one orchestration pattern."""
 
@@ -98,6 +118,8 @@ class PatternSpec:
     more than once - stop it, inspect it, restart it - so they supply an async
     callable returning narration lines instead of relying on the generic runner.
     """
+    prompt_examples: tuple[PromptExample, ...] = ()
+    """Prompts that each drive a different ending. Empty for patterns with one."""
     devui_name: str = ""
     """The Workflow name DevUI registers this pattern under.
 
@@ -123,6 +145,9 @@ class PatternSpec:
             "failureMode": self.failure_mode,
             "scenario": self.scenario,
             "defaultPrompt": self.default_prompt,
+            "promptExamples": [
+                {"ending": e.ending, "prompt": e.prompt, "why": e.why} for e in self.prompt_examples
+            ],
             "newThisYear": self.new_this_year,
             "devuiName": self.devui_name,
             "hasCustomRunner": self.demo is not None,
