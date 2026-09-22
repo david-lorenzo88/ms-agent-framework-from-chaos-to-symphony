@@ -119,6 +119,7 @@ function select(pattern) {
   fillList($('pUse'), pattern.useWhen);
   fillList($('pAvoid'), pattern.avoidWhen);
   fillList($('pApi'), pattern.mafApi);
+  fillEndings(pattern.promptExamples || []);
 
   $('diagramHint').textContent = pattern.hasCustomRunner
     ? 'this pattern drives itself — watch the log'
@@ -138,6 +139,37 @@ function select(pattern) {
 function fillList(host, items) {
   host.innerHTML = '';
   for (const item of items) host.appendChild(el('li', null, item));
+}
+
+/**
+ * One prompt per way this pattern can finish.
+ *
+ * Only the branching patterns carry these. The other eight end one way
+ * whatever you type, and an "endings" box on those would imply a choice that
+ * does not exist - so the box is hidden rather than shown empty.
+ */
+function fillEndings(examples) {
+  const box = $('endings');
+  const list = $('endingsList');
+  list.innerHTML = '';
+  box.hidden = examples.length === 0;
+  if (box.hidden) return;
+
+  for (const ex of examples) {
+    const btn = el('button', 'ending-btn');
+    btn.type = 'button';
+    btn.title = 'Load this prompt';
+    btn.appendChild(el('span', 'ending-name', '→ ' + ex.ending));
+    btn.appendChild(el('span', 'ending-prompt', ex.prompt));
+    if (ex.why) btn.appendChild(el('span', 'ending-why', ex.why));
+    btn.addEventListener('click', () => {
+      $('prompt').value = ex.prompt;
+      $('prompt').focus();
+    });
+    const row = el('li');
+    row.appendChild(btn);
+    list.appendChild(row);
+  }
 }
 
 /* ── diagram ──────────────────────────────────────────────────── */
@@ -375,6 +407,7 @@ async function run() {
   stopRun();
   clearNodes();
   resetConsole();
+  approvalRound = 0;
 
   state.traces = [];
   renderTraces();
@@ -520,9 +553,28 @@ function appendToken(source, text, t) {
 
 let pendingRequestId = null;
 
+/**
+ * How many times this run has stopped at the gate.
+ *
+ * A send-back re-runs the gated agent and suspends again, so the modal closes
+ * and reopens within a second or so. Without saying which round this is, that
+ * reads as a button that did nothing - which is exactly the wrong lesson for
+ * the one pattern whose whole point is that the human's answer changes the run.
+ */
+let approvalRound = 0;
+
 function showApproval(frame) {
   pendingRequestId = frame.requestId;
+  approvalRound += 1;
   $('approvalProposal').textContent = frame.proposal || '(no proposal text)';
+
+  const round = $('approvalRound');
+  round.hidden = approvalRound < 2;
+  if (!round.hidden) {
+    round.textContent =
+      `Round ${approvalRound}. You sent the last proposal back; the settlement agent re-priced it ` +
+      `and the gate suspended again.`;
+  }
 
   const facts = $('approvalFacts');
   facts.innerHTML = '';

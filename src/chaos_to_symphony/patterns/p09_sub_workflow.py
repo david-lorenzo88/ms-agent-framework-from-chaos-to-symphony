@@ -27,7 +27,7 @@ from agent_framework import (
 )
 from typing_extensions import Never
 
-from ..base import DiagramEdge, DiagramNode, PatternSpec
+from ..base import DiagramEdge, DiagramNode, PatternSpec, PromptExample
 from ..clients import chat_client
 from ..memory import STORE
 from ..tools import CUSTOMS_TOOLS
@@ -204,6 +204,23 @@ SPEC = PatternSpec(
         DiagramEdge("branch", "out", "blocked", "dashed"),
         DiagramEdge("branch", "claims", "cleared"),
         DiagramEdge("claims", "out", "settlement"),
+    ),
+    prompt_examples=(
+        PromptExample(
+            ending="HELD BY COMPLIANCE GATE",
+            prompt="Screen BFG-24086 through the compliance gate, then assess the claim.",
+            why="Consignee fails sanctions screening. The claims agent is never invoked at all.",
+        ),
+        PromptExample(
+            ending="HELD BY COMPLIANCE GATE",
+            prompt="Screen BFG-24084 through the compliance gate, then assess the claim.",
+            why="Cleared consignee, but HS 3004.20 needs an import licence - the other way to be held.",
+        ),
+        PromptExample(
+            ending="CLEARED AND ASSESSED",
+            prompt="Screen BFG-24081 through the compliance gate, then assess the claim.",
+            why="Clear consignee, no licence required, so the gate passes it to the claims agent.",
+        ),
     ),
     devui_name="SubWorkflow",
     build=build,

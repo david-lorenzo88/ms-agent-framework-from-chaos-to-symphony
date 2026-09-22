@@ -75,6 +75,7 @@ _VOICES: dict[str, str] = {
     "compliance": "Ran the consignee through sanctions screening.",
     "pricing": "Costed the exposure against the customer's SLA band.",
     "cost": "Modelled the direct and indirect cost of this exception.",
+    "claims": "Assessed the claim against the policy and the evidence.",
     "legal": "Reviewed contractual liability and penalty exposure.",
     "ops": "Assessed the operational recovery options.",
     "risk": "Scored the residual risk on this lane.",
@@ -82,6 +83,7 @@ _VOICES: dict[str, str] = {
     "draft": "Drafted the customer-facing response.",
     "review": "Reviewed the draft against tone and policy guidelines.",
     "editor": "Edited for clarity and length.",
+    "settle": "Proposed a settlement figure for sign-off.",
     "approver": "Assessed whether this needs human sign-off.",
     "billing": "Reconciled the invoice and credit position.",
     "manager": "Coordinating the specialists on this task.",
@@ -94,6 +96,17 @@ _VOICES: dict[str, str] = {
 }
 
 _FALLBACK_VOICE = "Reviewed the case and recorded a position."
+
+#: What a human-in-the-loop send-back says when it lands back in the agent's
+#: conversation. It lives here, rather than in the runner that sends it, because
+#: this client is the thing that has to *recognise* it: a real model re-prices
+#: because it reads the sentence, and the offline stand-in has to do the same or
+#: the approval gate looks broken - the same figure comes back forever and the
+#: "Send back" button appears to do nothing. ``runner`` imports this constant so
+#: the wording it sends and the wording matched here cannot drift apart.
+SEND_BACK_INSTRUCTION = (
+    "Sent back by the duty manager. Re-price this settlement at or below the approval threshold."
+)
 
 
 def _persona_key(name: str) -> str:
@@ -167,6 +180,36 @@ def _top_ranked_row(messages: Sequence[Message]) -> str | None:
     return match.group(1).strip() if match else None
 
 
+#: The offer line this client writes, and reads back on the next round.
+_OFFER_RE = re.compile(r"Settlement offer EUR ([\d,]+)")
+
+
+def _settlement_offer(shipment: Any, policy: Any, messages: Sequence[Message]) -> tuple[int, int | None]:
+    """The figure to put on the table now, and the one it replaces (None if first).
+
+    Opens at a tenth of the declared value, capped by the customer's goodwill
+    ceiling, and concedes 40% per send-back down to the approval threshold.
+
+    It concedes from *the last offer in the transcript* rather than from a count
+    of send-backs. Resuming a suspended workflow re-sends the gated agent's
+    request, and the thread the agent then sees can carry a duplicated proposal
+    or one send-back fewer than actually happened - so a count drifts, and a
+    settlement figure that drifts back upwards in front of the approver is worse
+    than no figure at all. The newest offer is always in the transcript to
+    concede from, however the bookkeeping shook out.
+    """
+    ceiling = policy.max_goodwill_eur if policy else shipment.declared_value_eur // 10
+    floor = policy.approval_threshold_eur if policy else 0
+    opening = min(shipment.declared_value_eur // 10, ceiling)
+
+    text = _conversation_text(messages)
+    offers = _OFFER_RE.findall(text)
+    if not offers or SEND_BACK_INSTRUCTION not in text:
+        return opening, None
+    previous = int(offers[-1].replace(",", ""))
+    return max(floor, int(previous * 0.6)), previous
+
+
 def _compose(persona: str, messages: Sequence[Message]) -> str:
     """Build a persona-flavoured reply that quotes real store data."""
     rng = random.Random(_seed_of(messages, persona))
@@ -204,6 +247,12 @@ def _compose(persona: str, messages: Sequence[Message]) -> str:
             f"Modelled exposure EUR {exposure:,} against a EUR {cap:,} goodwill ceiling "
             f"({customer.tier if customer else 'unknown'} tier)."
         )
+    elif key in {"claims"}:
+        cap = policy.max_goodwill_eur if policy else 0
+        facts.append(
+            f"Claim admissible on the evidence. Declared value EUR {shipment.declared_value_eur:,}, "
+            f"goodwill capped at EUR {cap:,} on the {customer.tier if customer else 'unknown'} tier."
+        )
     elif key in {"legal"}:
         facts.append(
             f"Declared value EUR {shipment.declared_value_eur:,}; CMR liability caps recovery well below that, "
@@ -230,6 +279,18 @@ def _compose(persona: str, messages: Sequence[Message]) -> str:
         top = _top_ranked_row(messages)
         if top:
             return head + " Worst case on the desk today: " + top
+    elif key in {"settle"}:
+        figure, previous = _settlement_offer(shipment, policy, messages)
+        ceiling = policy.max_goodwill_eur if policy else 0
+        threshold = policy.approval_threshold_eur if policy else 0
+        facts.append(
+            f"Settlement offer EUR {figure:,} against a EUR {ceiling:,} goodwill ceiling "
+            f"({customer.tier if customer else 'unknown'} tier); approval threshold EUR {threshold:,}."
+        )
+        if previous is not None and figure < previous:
+            facts.append(f"Re-priced after send-back: down from EUR {previous:,}.")
+        elif previous is not None:
+            facts.append(f"Held at the approval threshold EUR {threshold:,}; no further concession available.")
     elif key in {"approver"}:
         threshold = policy.approval_threshold_eur if policy else 0
         facts.append(f"Anything above EUR {threshold:,} on this tier needs a named human approver.")

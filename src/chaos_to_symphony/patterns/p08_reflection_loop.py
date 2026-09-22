@@ -27,7 +27,7 @@ from agent_framework import (
 )
 from pydantic import BaseModel
 
-from ..base import DiagramEdge, DiagramNode, PatternSpec, parse_structured
+from ..base import DiagramEdge, DiagramNode, PatternSpec, PromptExample, parse_structured
 from ..clients import chat_client
 from ..memory import STORE
 
@@ -217,6 +217,23 @@ SPEC = PatternSpec(
         DiagramEdge("rev", "judge", "verdict"),
         DiagramEdge("judge", "writer", "revise (max 3)", "loop"),
         DiagramEdge("judge", "out", "approve | escalate"),
+    ),
+    prompt_examples=(
+        PromptExample(
+            ending="APPROVED at revision 1",
+            prompt="Draft the customer letter for BFG-24082 and review it until it passes policy.",
+            why="The reviewer signs off the first draft. The loop is capable of not looping.",
+        ),
+        PromptExample(
+            ending="APPROVED at revision 3",
+            prompt="Draft the customer letter for BFG-24087 and review it until it passes policy.",
+            why="Two rounds of revision, then approval - the loop doing the work it exists for.",
+        ),
+        PromptExample(
+            ending="ESCALATED after 3 revisions",
+            prompt="Draft the customer letter for BFG-24081 and review it until it passes policy.",
+            why="The reviewer never approves, so MAX_REVISIONS ends it and a human picks it up.",
+        ),
     ),
     devui_name="ReflectionLoop",
     build=build,

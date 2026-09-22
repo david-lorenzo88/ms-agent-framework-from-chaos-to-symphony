@@ -30,7 +30,7 @@ from agent_framework import (
 from pydantic import BaseModel
 from typing_extensions import Never
 
-from ..base import DiagramEdge, DiagramNode, PatternSpec, parse_structured
+from ..base import DiagramEdge, DiagramNode, PatternSpec, PromptExample, parse_structured
 from ..clients import chat_client
 from ..memory import STORE
 
@@ -191,6 +191,23 @@ SPEC = PatternSpec(
         DiagramEdge("routed", "major", "critical | high"),
         DiagramEdge("routed", "std", "medium"),
         DiagramEdge("routed", "watch", "Default", "dashed"),
+    ),
+    prompt_examples=(
+        PromptExample(
+            ending="MAJOR INCIDENT DESK",
+            prompt="Triage exception BFG-24084 and route it to the right desk.",
+            why="Graded critical, so it matches the first Case and a duty manager is paged.",
+        ),
+        PromptExample(
+            ending="STANDARD QUEUE",
+            prompt="Triage exception BFG-24085 and route it to the right desk.",
+            why="Graded medium: past the first Case, matched by the second.",
+        ),
+        PromptExample(
+            ending="WATCHLIST (default branch)",
+            prompt="Triage exception BFG-24094 and route it to the right desk.",
+            why="Graded low, so no Case matches and Default catches it rather than it vanishing.",
+        ),
     ),
     devui_name="SwitchCase",
     build=build,
