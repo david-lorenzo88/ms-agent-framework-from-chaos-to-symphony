@@ -44,17 +44,64 @@ MAX_REPLICAS="${MAX_REPLICAS:-3}"
 #   AZURE_OPENAI_ENDPOINT=https://<resource>.openai.azure.com/ \
 #   AZURE_OPENAI_DEPLOYMENT=gpt-4o-mini \
 #   AZURE_OPENAI_API_KEY=<key> ./infra/deploy.sh
+#
+# Or against the Foundry Agent Service, which uses the app's managed identity
+# instead of a key - this script assigns one and grants it a role (step 5):
+#
+#   CHAOS_PROVIDER=foundry \
+#   FOUNDRY_PROJECT_ENDPOINT=https://<resource>.services.ai.azure.com/api/projects/<project> \
+#   FOUNDRY_MODEL=gpt-4o-mini ./infra/deploy.sh
 CHAOS_PROVIDER="${CHAOS_PROVIDER:-offline}"
 AZURE_OPENAI_ENDPOINT="${AZURE_OPENAI_ENDPOINT:-}"
 AZURE_OPENAI_DEPLOYMENT="${AZURE_OPENAI_DEPLOYMENT:-}"
 AZURE_OPENAI_API_KEY="${AZURE_OPENAI_API_KEY:-}"
 OPENAI_API_KEY="${OPENAI_API_KEY:-}"
+FOUNDRY_PROJECT_ENDPOINT="${FOUNDRY_PROJECT_ENDPOINT:-}"
+FOUNDRY_MODEL="${FOUNDRY_MODEL:-}"
+
+# The ARM id of the Foundry resource the identity is granted a role on. Left
+# unset it is resolved from the endpoint's hostname, which works when the
+# resource is in the subscription you are logged into. Set it to scope the
+# grant somewhere tighter - a single project rather than the whole account:
+#   .../accounts/<account>/projects/<project>
+FOUNDRY_SCOPE="${FOUNDRY_SCOPE:-}"
+
+# The built-in role the identity needs to call the project at runtime.
+# Microsoft renamed this family - "Azure AI User" became "Foundry User" - and
+# tenants do not all show the new name yet, so both are tried in turn. Set this
+# to pin one, or to use a different role entirely.
+FOUNDRY_ROLE="${FOUNDRY_ROLE:-}"
+
+# Which provider extras go into the image. Both are built in by default so the
+# app can switch provider by environment variable; trim it if you only need one.
+INSTALL_EXTRAS="${INSTALL_EXTRAS:-.[openai,foundry]}"
 
 if [ "$CHAOS_PROVIDER" != "offline" ]; then
   echo "WARNING: this app has no authentication. A public URL running a real"
   echo "         model can be used by anyone who finds it, at your expense."
   echo "         See 'Before you make it public' in the README."
   echo
+fi
+
+# Fail here rather than deploying an app that falls back to the scripted client
+# and reports OFFLINE, which looks like a broken deploy instead of a missing
+# setting. The fallback is right for a live demo; it is wrong for a deploy that
+# explicitly asked for a provider.
+if [ "$CHAOS_PROVIDER" = "foundry" ] && { [ -z "$FOUNDRY_PROJECT_ENDPOINT" ] || [ -z "$FOUNDRY_MODEL" ]; }; then
+  echo "CHAOS_PROVIDER=foundry needs FOUNDRY_PROJECT_ENDPOINT and FOUNDRY_MODEL:"
+  echo
+  echo "  CHAOS_PROVIDER=foundry \\"
+  echo "  FOUNDRY_PROJECT_ENDPOINT=https://<resource>.services.ai.azure.com/api/projects/<project> \\"
+  echo "  FOUNDRY_MODEL=<deployment> ./infra/deploy.sh"
+  exit 1
+fi
+if [ "$CHAOS_PROVIDER" = "azure" ] && { [ -z "$AZURE_OPENAI_ENDPOINT" ] || [ -z "$AZURE_OPENAI_DEPLOYMENT" ]; }; then
+  echo "CHAOS_PROVIDER=azure needs AZURE_OPENAI_ENDPOINT and AZURE_OPENAI_DEPLOYMENT."
+  exit 1
+fi
+if [ "$CHAOS_PROVIDER" = "openai" ] && [ -z "$OPENAI_API_KEY" ]; then
+  echo "CHAOS_PROVIDER=openai needs OPENAI_API_KEY."
+  exit 1
 fi
 
 command -v az >/dev/null || { echo "Azure CLI not found: https://aka.ms/azure-cli"; exit 1; }
@@ -146,7 +193,8 @@ IMAGE="${ACR_NAME}.azurecr.io/${IMAGE_NAME}:${TAG}"
 echo
 echo "Building ${IMAGE_NAME}:${TAG} in ACR (first build takes a few minutes)..."
 echo
-az acr build --registry "$ACR_NAME" --image "${IMAGE_NAME}:${TAG}" --file Dockerfile .
+az acr build --registry "$ACR_NAME" --image "${IMAGE_NAME}:${TAG}" \
+   --build-arg "INSTALL_EXTRAS=${INSTALL_EXTRAS}" --file Dockerfile .
 
 # ---------------------------------------------------------------------------
 # 4. The app
@@ -164,6 +212,8 @@ ENV_VARS=(
 )
 # Only pass provider settings that were actually supplied, so an offline
 # deploy does not plant empty variables on the app.
+[ -n "$FOUNDRY_PROJECT_ENDPOINT" ] && ENV_VARS+=("FOUNDRY_PROJECT_ENDPOINT=$FOUNDRY_PROJECT_ENDPOINT")
+[ -n "$FOUNDRY_MODEL" ]           && ENV_VARS+=("FOUNDRY_MODEL=$FOUNDRY_MODEL")
 [ -n "$AZURE_OPENAI_ENDPOINT" ]   && ENV_VARS+=("AZURE_OPENAI_ENDPOINT=$AZURE_OPENAI_ENDPOINT")
 [ -n "$AZURE_OPENAI_DEPLOYMENT" ] && ENV_VARS+=("AZURE_OPENAI_DEPLOYMENT=$AZURE_OPENAI_DEPLOYMENT")
 [ -n "$AZURE_OPENAI_API_KEY" ]    && ENV_VARS+=("AZURE_OPENAI_API_KEY=secretref:azure-openai-key")
@@ -208,6 +258,81 @@ else
      --min-replicas "$MIN_REPLICAS" --max-replicas "$MAX_REPLICAS" \
      --env-vars "${ENV_VARS[@]}" \
      --only-show-errors -o none
+fi
+
+# ---------------------------------------------------------------------------
+# 5. Identity, for Foundry
+#
+# FoundryChatClient authenticates with DefaultAzureCredential, which inside a
+# container app means the app's own managed identity. Without one the client
+# still *constructs* - so the app reports provider "foundry" and the badge goes
+# green - and then every agent call fails at request time, because the fallback
+# in clients.py only wraps construction. A deploy that looks live and answers
+# nothing is worse than an honest OFFLINE, so the identity is set up here.
+# ---------------------------------------------------------------------------
+
+if [ "$CHAOS_PROVIDER" = "foundry" ]; then
+  echo
+  echo "Assigning a system-assigned managed identity..."
+  PRINCIPAL_ID="$(az containerapp identity assign \
+                  --name "$APP_NAME" --resource-group "$RESOURCE_GROUP" \
+                  --system-assigned --query principalId -o tsv --only-show-errors)"
+
+  if [ -z "$FOUNDRY_SCOPE" ]; then
+    # https://<account>.services.ai.azure.com/api/projects/<project> - the role
+    # is granted on the ARM resource, which the endpoint URL does not name.
+    FOUNDRY_ACCOUNT="$(printf '%s' "$FOUNDRY_PROJECT_ENDPOINT" | sed -E 's#^https?://([^./]+)\..*#\1#')"
+    FOUNDRY_SCOPE="$(az cognitiveservices account list \
+                     --query "[?name=='${FOUNDRY_ACCOUNT}'].id | [0]" \
+                     -o tsv --only-show-errors 2>/dev/null || true)"
+  fi
+
+  if [ -z "$FOUNDRY_SCOPE" ]; then
+    echo
+    echo "  Could not resolve the Foundry resource from the endpoint, so no role was"
+    echo "  granted. The app will deploy and every model call will fail until it is."
+    echo "  Find the id and grant it, then re-run - or just run the grant:"
+    echo
+    echo "    az cognitiveservices account list --query \"[].{name:name, id:id}\" -o table"
+    echo "    az role assignment create --assignee-object-id $PRINCIPAL_ID \\"
+    echo "      --assignee-principal-type ServicePrincipal \\"
+    echo "      --role 'Azure AI User' --scope <id from above>"
+  else
+    GRANTED=""
+    # --assignee-object-id with an explicit principal type skips the Graph
+    # lookup, which a seconds-old identity is not in yet.
+    for role in ${FOUNDRY_ROLE:+"$FOUNDRY_ROLE"} "Azure AI User" "Foundry User"; do
+      if az role assignment create --assignee-object-id "$PRINCIPAL_ID" \
+           --assignee-principal-type ServicePrincipal \
+           --role "$role" --scope "$FOUNDRY_SCOPE" \
+           --only-show-errors -o none 2>/dev/null; then
+        GRANTED="$role"
+        break
+      fi
+    done
+
+    if [ -z "$GRANTED" ]; then
+      GRANTED="$(az role assignment list --assignee "$PRINCIPAL_ID" --scope "$FOUNDRY_SCOPE" \
+                 --query "[0].roleDefinitionName" -o tsv --only-show-errors 2>/dev/null || true)"
+      [ -n "$GRANTED" ] && echo "  Already granted: $GRANTED"
+    else
+      echo "  Granted '$GRANTED' on $FOUNDRY_SCOPE"
+    fi
+
+    if [ -z "$GRANTED" ]; then
+      echo
+      echo "  Could not grant a role. Either the names have moved again or you lack"
+      echo "  permission to assign roles on that resource. List what exists with:"
+      echo
+      echo "    az role definition list --scope $FOUNDRY_SCOPE --query \"[].roleName\" -o tsv"
+      echo
+      echo "  then re-run with FOUNDRY_ROLE='<name>'."
+    else
+      # RBAC is eventually consistent; the first calls after a fresh grant can
+      # still come back 401 for a minute or two.
+      echo "  Role assignments take a minute or two to take effect."
+    fi
+  fi
 fi
 
 FQDN="$(az containerapp show --name "$APP_NAME" --resource-group "$RESOURCE_GROUP" \

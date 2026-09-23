@@ -406,13 +406,52 @@ AZURE_OPENAI_API_KEY=<key> ./infra/deploy.sh
 ```
 
 Azure OpenAI is reached by giving `OpenAIChatClient` an `azure_endpoint` — there
-is no `AzureOpenAIChatClient` in Agent Framework. The image ships the `openai`
-extra so this is an environment-variable change rather than a rebuild;
-`foundry` is a separate extra:
+is no `AzureOpenAIChatClient` in Agent Framework. Locally, each live provider is
+an extra:
 
 ```bash
+pip install '.[openai]'    # OpenAI and Azure OpenAI
 pip install '.[foundry]'   # Foundry Agent Service
 ```
+
+The deployed image ships **both**, so switching provider there is an
+environment-variable change rather than a rebuild. That matters more than the
+~30MB: a missing extra does not fail, it falls back — so an image built without
+`foundry` would answer `CHAOS_PROVIDER=foundry` by quietly running the scripted
+client while the badge claimed a live model. Trim it with
+`INSTALL_EXTRAS='.[openai]' ./infra/deploy.sh` if you only need one.
+
+### Deploying against Foundry
+
+Foundry does not take a key. `FoundryChatClient` authenticates with
+`DefaultAzureCredential`, which inside a container app means the app's own
+managed identity, so there are two extra moving parts the script handles:
+
+```bash
+CHAOS_PROVIDER=foundry \
+FOUNDRY_PROJECT_ENDPOINT=https://<resource>.services.ai.azure.com/api/projects/<project> \
+FOUNDRY_MODEL=<deployment> ./infra/deploy.sh
+```
+
+It assigns the app a system-assigned managed identity, resolves the Foundry
+resource from the endpoint's hostname, and grants that identity the role it
+needs to call the project. Microsoft renamed this role family — **Azure AI User**
+became **Foundry User** — and tenants do not all show the new name yet, so both
+are tried in turn; `FOUNDRY_ROLE='<name>'` pins one. `FOUNDRY_SCOPE='<arm-id>'`
+scopes the grant somewhere tighter than the account, such as a single project.
+
+If either step cannot be completed — the resource is in another subscription, or
+you cannot assign roles on it — the script says so and prints the exact command
+to finish it by hand, rather than leaving you to discover it from a 401. Two
+things worth knowing:
+
+- **RBAC is eventually consistent.** The first model calls after a fresh grant
+  can still come back 401 for a minute or two.
+- **A missing role does not degrade gracefully.** The fallback in `clients.py`
+  only wraps client *construction*, so with the endpoint set but no role the app
+  reports provider `foundry` and then fails on every run. `/api/health` tells you
+  which state you are in: `requestedProvider` is what you asked for, `provider`
+  is what the app could actually build.
 
 Check a provider before running twelve patterns against it:
 
