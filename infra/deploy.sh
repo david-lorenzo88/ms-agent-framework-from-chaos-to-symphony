@@ -240,6 +240,48 @@ SECRETS=()
 # resource's own provisioningState say what happened.
 # ---------------------------------------------------------------------------
 
+# ---------------------------------------------------------------------------
+# Retry the short ARM calls, because ARM has bad days.
+#
+# A transient outage answers with a 503 and an HTML page - "Our services aren't
+# available right now", with Ref A/B/C underneath - and the CLI's own error
+# handler then dies trying to json.loads() that HTML. What you see is
+# "Expecting property name enclosed in double quotes: line 1 column 2", which
+# looks like a bug in the request and is nothing of the sort: the real error is
+# further up the traceback. One of these took a deploy down on the registry
+# step, which had no retry because the create/update calls got all the
+# attention.
+#
+# Everything wrapped here is an idempotent configuration write, so trying again
+# is free, and four attempts over half a minute covers the blips that are not
+# an actual outage.
+# ---------------------------------------------------------------------------
+
+az_retry() {
+  local label="$1"; shift
+  local attempt pause
+  for attempt in 1 2 3 4; do
+    if "$@"; then
+      return 0
+    fi
+    if [ "$attempt" -eq 4 ]; then
+      break
+    fi
+    pause=$((attempt * 5))
+    # Progress goes to stderr: one of these calls is read through a command
+    # substitution, and chatter on stdout would end up inside the value.
+    echo "  $label did not take (attempt $attempt of 4). Retrying in ${pause}s..." >&2
+    sleep "$pause"
+  done
+  {
+    echo
+    echo "  $label failed four times. If that traceback ends in a JSONDecodeError,"
+    echo "  the real error is above it - the CLI cannot parse ARM's HTML outage page."
+    echo "  Nothing here is half-applied; re-run when Azure settles and every step resumes."
+  } >&2
+  return 1
+}
+
 app_state() {
   az containerapp show --name "$APP_NAME" --resource-group "$RESOURCE_GROUP" \
      --query properties.provisioningState -o tsv --only-show-errors 2>/dev/null || true
@@ -281,14 +323,17 @@ if az containerapp show --name "$APP_NAME" --resource-group "$RESOURCE_GROUP" \
   echo "Updating $APP_NAME..."
   # Registry credentials are configured on the app already; update only needs
   # to be told which image to move to.
-  az containerapp registry set --name "$APP_NAME" --resource-group "$RESOURCE_GROUP" \
+  az_retry "Pointing the app at the registry" \
+     az containerapp registry set --name "$APP_NAME" --resource-group "$RESOURCE_GROUP" \
      --server "${ACR_NAME}.azurecr.io" --username "$ACR_USER" --password "$ACR_PASS" \
      --only-show-errors -o none
   if [ ${#SECRETS[@]} -gt 0 ]; then
-    az containerapp secret set --name "$APP_NAME" --resource-group "$RESOURCE_GROUP" \
+    az_retry "Setting the app secrets" \
+       az containerapp secret set --name "$APP_NAME" --resource-group "$RESOURCE_GROUP" \
        --secrets "${SECRETS[@]}" --only-show-errors -o none
   fi
-  az containerapp update --name "$APP_NAME" --resource-group "$RESOURCE_GROUP" \
+  az_retry "The app update" \
+     az containerapp update --name "$APP_NAME" --resource-group "$RESOURCE_GROUP" \
      --image "$IMAGE" \
      --cpu "$CPU" --memory "$MEMORY" \
      --min-replicas "$MIN_REPLICAS" --max-replicas "$MAX_REPLICAS" \
@@ -297,7 +342,8 @@ if az containerapp show --name "$APP_NAME" --resource-group "$RESOURCE_GROUP" \
   wait_for_app
 else
   echo "Creating $APP_NAME..."
-  az containerapp create --name "$APP_NAME" --resource-group "$RESOURCE_GROUP" \
+  az_retry "Creating the app" \
+     az containerapp create --name "$APP_NAME" --resource-group "$RESOURCE_GROUP" \
      --environment "$ENVIRONMENT" \
      --image "$IMAGE" \
      --target-port 8000 --ingress external \
@@ -325,7 +371,8 @@ fi
 if [ "$CHAOS_PROVIDER" = "foundry" ]; then
   echo
   echo "Assigning a system-assigned managed identity..."
-  PRINCIPAL_ID="$(az containerapp identity assign \
+  PRINCIPAL_ID="$(az_retry "Assigning the managed identity" \
+                  az containerapp identity assign \
                   --name "$APP_NAME" --resource-group "$RESOURCE_GROUP" \
                   --system-assigned --query principalId -o tsv --only-show-errors)"
 
