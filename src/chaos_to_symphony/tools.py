@@ -145,3 +145,8 @@ def record_decision(
 CASE_TOOLS = [lookup_shipment, get_customer, estimate_compensation, record_decision]
 CUSTOMS_TOOLS = [lookup_shipment, classify_tariff, check_sanctions]
 ANALYSIS_TOOLS = [list_open_exceptions, lookup_shipment, get_customer]
+
+#: Read-only, for an agent that grades a case rather than acting on it. A
+#: classifier that could also write to the audit trail would be a classifier
+#: with side effects, which is not what the routing pattern is demonstrating.
+TRIAGE_TOOLS = [lookup_shipment]

@@ -33,6 +33,7 @@ from typing_extensions import Never
 from ..base import DiagramEdge, DiagramNode, PatternSpec, PromptExample, parse_structured
 from ..clients import chat_client
 from ..memory import STORE
+from ..tools import TRIAGE_TOOLS
 
 CASE_KEY = "case_text"
 
@@ -115,9 +116,19 @@ def build():
             name="triage-classifier",
             description="Grades a freight exception into a severity and a kind.",
             instructions=(
-                "Grade the freight exception. Return JSON with 'severity' (critical, high, medium or low), "
-                "'exception_kind' and a one-sentence 'reason'. Return nothing but JSON."
+                "Grade the freight exception. If the request names a shipment reference, look it up "
+                "first: the record carries the exception kind and the severity on file, and a grade "
+                "invented without them is a guess. Then return JSON with 'severity' (critical, high, "
+                "medium or low), 'exception_kind' and a one-sentence 'reason'. Return nothing but JSON."
             ),
+            # Read-only access to the case file. Without it a real model asked to
+            # "triage exception BFG-24084" knows nothing except that the string
+            # looks like a reference, and grades every case the same safe middle
+            # way - which lands every run on the medium branch and makes the
+            # routing look broken. The offline client never showed this: it reads
+            # the shipment out of the in-memory store itself, so it has facts the
+            # model it stands in for was never given.
+            tools=TRIAGE_TOOLS,
             default_options=ChatOptions(response_format=Triage),
         ),
         id="triage-classifier",
