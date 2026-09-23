@@ -91,6 +91,22 @@ down to the customer's approval threshold, quoting what it came down from. The
 modal names the round, because the gate reopening within a second of a click
 otherwise reads as a button that did nothing.
 
+### Why only one specialist lights up
+
+Handoff and group chat build a **fully connected graph**. After each turn the
+active agent broadcasts the conversation to every other participant so their
+histories stay in step — an `AgentExecutorRequest` with `should_respond=False`.
+Each recipient really is invoked: it files the messages and returns without
+calling its model.
+
+So `executor_invoked` and `executor_completed` fire for every participant on
+every turn. They are honest events, but they answer *who received a message*,
+not *who worked the case* — and lighting the diagram off them turned all four
+specialists green on the one pattern whose whole point is that exactly one was
+chosen. The runner now skips the broadcasts when colouring boxes and says so in
+the log instead, so the mechanism is still visible without the diagram claiming
+work that never happened.
+
 ### Seeing what each agent actually is
 
 The **Agents** tab lists every agent in the selected pattern with its system
@@ -446,6 +462,20 @@ environment-variable change rather than a rebuild. That matters more than the
 `foundry` would answer `CHAOS_PROVIDER=foundry` by quietly running the scripted
 client while the badge claimed a live model. Trim it with
 `INSTALL_EXTRAS='.[openai]' ./infra/deploy.sh` if you only need one.
+
+### If a change does not show up in the browser
+
+The site has no build step, so `app.js` and `styles.css` keep the same names
+forever. A browser handed a file with no freshness header is entitled to invent
+one — commonly a tenth of the file's age — so after a redeploy you can end up
+holding the new `index.html` and a cached `app.js`. The new markup renders a
+control the old script knows nothing about, the click does nothing, and there
+is no error anywhere to explain it.
+
+The app therefore serves `/`, `/app.js` and `/styles.css` with
+`Cache-Control: no-cache`, which means *store it, but ask before using it*. An
+ordinary reload is enough to pick up a redeploy. If you are looking at an older
+deploy that predates this, one hard refresh (Ctrl/Cmd+Shift+R) clears it.
 
 ### Setting the provider from the site
 
