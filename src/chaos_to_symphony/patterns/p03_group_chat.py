@@ -33,18 +33,37 @@ def committee_selector(state: GroupChatState) -> str:
     instead - one keyword, same builder.
     """
     names = list(state.participants.keys())
+    chair, specialists = names[0], names[1:]
+    if not specialists:
+        return chair
+
     # The chair opens, every specialist speaks once, then the chair sums up.
     #
-    # Note it hands back to the chair after the last specialist rather than at
+    # It hands back to the chair after the last specialist rather than at
     # MAX_ROUNDS - 1. Close on the final permitted round and you can no longer
     # tell which rule ended the meeting: the condition and the cap fire at the
     # same moment and look identical in the log. Closing early leaves a spare
     # round the run never needs, so a meeting that ends is a meeting the
     # termination condition ended - and a cap that fires is a real fault worth
     # seeing, not the normal path.
-    if state.current_round == 0 or state.current_round >= len(names):
-        return names[0]
-    return names[state.current_round]
+    if state.current_round == 0:
+        return chair
+    if state.current_round <= len(specialists):
+        return specialists[state.current_round - 1]
+    if state.current_round == len(names):
+        return chair
+
+    # And if that summing-up did not settle it, the floor goes back round the
+    # specialists rather than to the chair a second time. Never the same
+    # speaker twice running: the orchestrator broadcasts a turn to everyone
+    # *except* the agent that produced it, and then asks the next speaker to
+    # respond with an empty message list, trusting the broadcast to have
+    # carried the conversation. Pick the same agent again and there was no
+    # broadcast to it, so a real provider is asked to complete nothing and
+    # answers "Messages are required for chat completions". Offline never sees
+    # it, because the scripted chair always names a figure and the meeting
+    # always ends at the summing-up.
+    return specialists[(state.current_round - len(names) - 1) % len(specialists)]
 
 
 #: A money figure: "EUR 8,000", "8000 EUR", "8.000 euros" or a bare symbol.
