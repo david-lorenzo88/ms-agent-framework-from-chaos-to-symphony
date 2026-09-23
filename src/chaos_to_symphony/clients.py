@@ -13,12 +13,13 @@ import os
 from functools import lru_cache
 from typing import Any
 
+from . import runtime_config
 from .scripted import ScriptedChatClient
 
 
 def provider() -> str:
     """The configured provider name, lowercased."""
-    return os.getenv("CHAOS_PROVIDER", "offline").strip().lower()
+    return (runtime_config.value("CHAOS_PROVIDER", "offline") or "offline").strip().lower()
 
 
 def is_offline() -> bool:
@@ -89,6 +90,18 @@ def effective() -> dict[str, Any]:
     }
 
 
+@runtime_config.on_change
+def _forget_cached_provider() -> None:
+    """Recompute the provider after the settings panel changes it.
+
+    ``effective`` is cached because it builds a client to answer honestly, and
+    ``_warn_once`` exists so a fallback warning does not repeat every call.
+    Both would otherwise keep reporting the provider the app started with.
+    """
+    effective.cache_clear()
+    _warn_once.cache_clear()
+
+
 def chat_client(persona: str = "agent", *, tool_budget: int = 1) -> Any:
     """Return a chat client for one agent persona.
 
@@ -128,8 +141,8 @@ def chat_client(persona: str = "agent", *, tool_budget: int = 1) -> Any:
             _warn_once("CHAOS_PROVIDER=azure but endpoint/deployment are unset; using the offline scripted client.")
 
     elif name == "foundry":
-        endpoint = os.getenv("FOUNDRY_PROJECT_ENDPOINT")
-        model = os.getenv("FOUNDRY_MODEL")
+        endpoint = runtime_config.value("FOUNDRY_PROJECT_ENDPOINT")
+        model = runtime_config.value("FOUNDRY_MODEL")
         if endpoint and model:
             try:
                 from agent_framework.foundry import FoundryChatClient

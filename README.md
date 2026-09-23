@@ -271,6 +271,7 @@ src/chaos_to_symphony/
   devui_app.py    registers all twelve workflows with DevUI
   devui_input.py  makes DevUI ask for a prompt, not a Message form
   introspect.py   reads each agent's prompt and tools off the built workflow
+  runtime_config.py  provider settings the site can change, saved to a file
   patterns/       one module per pattern, p01…p12
 web/              the showcase site: no framework, no CDN, no build step
 deck/             the session deck and the script that builds it
@@ -445,6 +446,37 @@ environment-variable change rather than a rebuild. That matters more than the
 `foundry` would answer `CHAOS_PROVIDER=foundry` by quietly running the scripted
 client while the badge claimed a live model. Trim it with
 `INSTALL_EXTRAS='.[openai]' ./infra/deploy.sh` if you only need one.
+
+### Setting the provider from the site
+
+**Settings**, top right. Pick `offline` or `foundry`, paste your project
+endpoint and model deployment, save. The patterns pick it up on their next run
+— no restart, no redeploy, no environment variables. It is written to a file on
+the server (`.chaos-config.json`, or wherever `CHAOS_CONFIG_FILE` points), so it
+survives a restart, and *Reset to environment* deletes that file and hands
+control back to whatever the process was started with.
+
+The panel reports the **effective** provider rather than the configured one, so
+the failure this repo keeps hitting — a provider set with no endpoint, silently
+running scripted while the badge claims a model — shows up as a sentence
+instead of as a confusing demo.
+
+Three things it deliberately does not do:
+
+- **No API keys.** Only `offline` and `foundry` are selectable, because Foundry
+  authenticates with `DefaultAzureCredential` and needs no secret. Azure OpenAI
+  and OpenAI stay environment-only: a key typed into an unauthenticated public
+  page is a key leaked.
+- **It does not reach DevUI.** DevUI builds its twelve workflows at start-up, in
+  its own process, so it keeps the provider it started with until restarted.
+- **It is per replica.** The file is on the container's own disk. `deploy.sh`
+  scales to three replicas under load, and a setting saved through one of them
+  is not seen by the others — fine for a laptop or a single warm replica,
+  not a substitute for deploying with the environment set.
+
+The site has no authentication, so on a public deploy anyone who finds the URL
+can change the provider. `CHAOS_CONFIG_API=0` makes the panel read-only; the
+API then answers 403 and the buttons disable themselves.
 
 ### Deploying against Foundry
 

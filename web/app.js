@@ -41,28 +41,14 @@ async function boot() {
   state.patterns = data.patterns;
   state.tiers = data.tiers;
 
-  const pill = $('providerPill');
-  if (data.providerNote) {
-    // A live provider was asked for and is not actually available. Say so
-    // rather than letting the badge claim a model that is not being called.
-    pill.textContent = `${data.requestedProvider} unavailable · offline`;
-    pill.classList.add('pill-warn');
-    pill.title = data.providerNote;
-  } else if (data.offline) {
-    pill.textContent = 'offline · no keys needed';
-    pill.classList.add('pill-offline');
-    pill.title = 'Agents run against a deterministic scripted client. No model is called.';
-  } else {
-    pill.textContent = `live · ${data.provider}`;
-    pill.classList.add('pill-live');
-    pill.title = 'Agents are calling a real model.';
-  }
+  paintProviderPill(data);
 
   $('devuiLink').href = data.devuiUrl;
   $('devuiOpen').href = data.devuiUrl;
 
   buildRail();
   wireControls();
+  wireSettings();
 
   // Deep-link support, so a slide can point straight at one pattern.
   const wanted = new URLSearchParams(location.search).get('pattern');
@@ -743,6 +729,138 @@ async function loadStore() {
     tr.appendChild(value);
     body.appendChild(tr);
   }
+}
+
+/* ── provider settings ────────────────────────────────────────── */
+
+/**
+ * The badge that says what the demos are really running against.
+ *
+ * Driven by the *effective* provider rather than the configured one, so it can
+ * never claim a live model that quietly fell back to the scripted client -
+ * which is the failure this whole panel exists to make visible.
+ */
+function paintProviderPill(status) {
+  const pill = $('providerPill');
+  pill.classList.remove('pill-warn', 'pill-offline', 'pill-live');
+  if (status.note || status.providerNote) {
+    pill.textContent = `${status.requestedProvider} unavailable · offline`;
+    pill.classList.add('pill-warn');
+    pill.title = status.note || status.providerNote;
+  } else if (status.offline) {
+    pill.textContent = 'offline · no keys needed';
+    pill.classList.add('pill-offline');
+    pill.title = 'Agents run against a deterministic scripted client. No model is called.';
+  } else {
+    pill.textContent = `live · ${status.provider}`;
+    pill.classList.add('pill-live');
+    pill.title = 'Agents are calling a real model.';
+  }
+}
+
+function wireSettings() {
+  $('settingsBtn').addEventListener('click', openSettings);
+  $('cfgClose').addEventListener('click', () => { $('settingsModal').hidden = true; });
+  $('cfgProvider').addEventListener('change', () => {
+    $('foundryFields').hidden = $('cfgProvider').value !== 'foundry';
+  });
+  $('settingsForm').addEventListener('submit', (event) => {
+    event.preventDefault();
+    sendSettings('PUT', {
+      provider: $('cfgProvider').value,
+      foundryProjectEndpoint: $('cfgEndpoint').value,
+      foundryModel: $('cfgModel').value,
+    });
+  });
+  $('cfgReset').addEventListener('click', () => sendSettings('DELETE', null));
+  document.addEventListener('keydown', (event) => {
+    if (event.key === 'Escape' && !$('settingsModal').hidden) $('settingsModal').hidden = true;
+  });
+}
+
+async function openSettings() {
+  $('settingsError').hidden = true;
+  $('settingsModal').hidden = false;
+  try {
+    paintSettings(await (await fetch('/api/config')).json());
+  } catch (err) {
+    showSettingsError(`Could not read the settings (${err.message}).`);
+  }
+}
+
+function paintSettings(data) {
+  const values = data.values || {};
+  const provider = (values.CHAOS_PROVIDER || 'offline').toLowerCase();
+  const selectable = data.selectableProviders || [];
+
+  $('cfgProvider').value = selectable.includes(provider) ? provider : 'offline';
+  $('cfgEndpoint').value = values.FOUNDRY_PROJECT_ENDPOINT || '';
+  $('cfgModel').value = values.FOUNDRY_MODEL || '';
+  $('foundryFields').hidden = $('cfgProvider').value !== 'foundry';
+
+  const status = data.status || {};
+  const box = $('settingsStatus');
+  box.classList.remove('is-live', 'is-warn');
+  if (status.note) {
+    box.classList.add('is-warn');
+    box.textContent = status.note;
+  } else if (status.offline) {
+    box.textContent = `Running offline on ${status.client}. No model is called.`;
+  } else {
+    box.classList.add('is-live');
+    box.textContent = `Live on ${status.provider} via ${status.client}` +
+      (status.baseUrl ? ` — ${status.baseUrl}` : '') + '.';
+  }
+
+  // Say where each value came from, so "why is it still offline" is answerable
+  // without reading the deploy script.
+  const sources = data.sources || {};
+  const saved = Object.values(sources).some((s) => s === 'saved');
+  const parts = [];
+  parts.push(saved
+    ? `Saved settings are in use, from ${data.configPath}.`
+    : `No saved settings — these values come from the environment the app was started with.`);
+  if (!data.writable) parts.push('Read-only here (CHAOS_CONFIG_API=0).');
+  parts.push('Patterns pick this up on their next run. DevUI builds its workflows at start-up, ' +
+             'so restart it to change what it uses.');
+  $('settingsFoot').textContent = parts.join(' ');
+
+  const disabled = data.writable === false;
+  $('cfgSave').disabled = disabled;
+  $('cfgReset').disabled = disabled;
+}
+
+async function sendSettings(method, body) {
+  $('settingsError').hidden = true;
+  $('cfgSave').disabled = true;
+  try {
+    const response = await fetch('/api/config', {
+      method,
+      headers: body ? { 'Content-Type': 'application/json' } : undefined,
+      body: body ? JSON.stringify(body) : undefined,
+    });
+    const data = await response.json().catch(() => ({}));
+    if (!response.ok) throw new Error(data.detail || `HTTP ${response.status}`);
+
+    paintSettings(data);
+    paintProviderPill(data.status || {});
+    if (data.persisted === false) {
+      showSettingsError('Applied for this process, but the settings file could not be written — ' +
+                        'it will not survive a restart.');
+    }
+    // The agent cards name the client each agent drives, so they are now stale.
+    if ($('panel-agents').classList.contains('is-on')) loadAgents();
+  } catch (err) {
+    showSettingsError(err.message);
+  } finally {
+    $('cfgSave').disabled = false;
+  }
+}
+
+function showSettingsError(message) {
+  const box = $('settingsError');
+  box.textContent = message;
+  box.hidden = false;
 }
 
 /* ── agents ───────────────────────────────────────────────────── */

@@ -79,6 +79,12 @@ code { font-family: var(--mono); font-size: .88em; }
 .pill-offline { background: var(--amber); color: var(--navy-deep); }
 .pill-live    { background: var(--mint);  color: #0C3B1B; }
 .pill-warn    { background: var(--red);   color: #fff; }
+.pill-btn {
+  font-family: inherit; cursor: pointer;
+  border: 1px solid rgba(255,255,255,.3); color: #DCE9F7;
+}
+.pill-btn:hover { background: rgba(255,255,255,.22); }
+.pill-btn:focus-visible { outline: 2px solid var(--amber); outline-offset: 2px; }
 .pill-link { text-decoration: none; border: 1px solid rgba(255,255,255,.3); }
 .pill-link:hover { background: rgba(255,255,255,.22); }
 
@@ -368,6 +374,43 @@ code { font-family: var(--mono); font-size: .88em; }
 .grid .right { text-align: right; }
 .panel .grid { display: block; max-height: 360px; overflow-y: auto; }
 .store-note { font-size: .79rem; color: var(--ink-faint); margin: 0 0 .6rem; }
+
+/* ── provider settings ───────────────────────────────────────── */
+
+.modal-wide { max-width: 620px; }
+
+.settings-status {
+  margin: 0 0 1rem; padding: .5rem .7rem; border-radius: var(--radius-sm);
+  font-size: .8rem; background: #F4F7FA; border-left: 3px solid var(--steel); color: var(--navy);
+}
+.settings-status.is-live { background: #EAF6EC; border-left-color: var(--mint); }
+.settings-status.is-warn { background: #FFF6E6; border-left-color: var(--amber-warm); }
+
+.field { margin-bottom: .85rem; }
+.field label {
+  display: block; margin-bottom: .25rem;
+  font-size: .76rem; font-weight: 700; color: var(--navy);
+}
+.field select, .field input {
+  width: 100%; padding: .5rem .6rem;
+  border: 1px solid var(--line); border-radius: var(--radius-sm);
+  font-family: var(--mono); font-size: .8rem; color: var(--ink); background: var(--paper);
+}
+.field select { font-family: var(--font); }
+.field select:focus, .field input:focus { outline: 2px solid var(--navy-soft); outline-offset: 1px; }
+.field-hint { margin: .25rem 0 0; font-size: .73rem; color: var(--ink-faint); }
+.field-note {
+  margin: .1rem 0 .9rem; padding: .5rem .65rem; border-radius: var(--radius-sm);
+  background: #F7FAFD; font-size: .75rem; color: var(--ink-soft); line-height: 1.5;
+}
+.field-note code { font-family: var(--mono); font-size: .72rem; color: var(--navy); }
+
+.settings-error {
+  margin: 0 0 .8rem; padding: .5rem .7rem; border-radius: var(--radius-sm);
+  background: #FDEDED; border-left: 3px solid var(--red); color: #8A1616; font-size: .78rem;
+}
+.settings-error[hidden] { display: none; }
+.settings-foot { margin: .9rem 0 0; font-size: .73rem; color: var(--ink-faint); line-height: 1.5; }
 
 /* ── agents: the prompt and tools behind each box in the diagram ─ */
 

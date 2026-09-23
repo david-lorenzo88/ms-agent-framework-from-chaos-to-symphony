@@ -26,7 +26,7 @@ from fastapi.responses import FileResponse, JSONResponse, StreamingResponse
 from fastapi.staticfiles import StaticFiles
 from pydantic import BaseModel
 
-from . import __version__, telemetry
+from . import __version__, runtime_config, telemetry
 from .clients import effective, provider
 from .introspect import agents_in
 from .memory import STORE
@@ -113,6 +113,20 @@ class ApprovalRequest(BaseModel):
     decision: str = "approve"
 
 
+class ConfigRequest(BaseModel):
+    """What the settings panel sends. No keys: Foundry does not take one."""
+
+    provider: str = "offline"
+    foundryProjectEndpoint: str = ""
+    foundryModel: str = ""
+
+
+#: Set CHAOS_CONFIG_API=0 to make the settings panel read-only. Worth doing on
+#: a public deploy: the site has no authentication, so anyone who finds the URL
+#: can otherwise point the demo at a different Foundry project.
+CONFIG_WRITABLE = os.getenv("CHAOS_CONFIG_API", "1") == "1"
+
+
 # --------------------------------------------------------------------------
 # Catalogue
 # --------------------------------------------------------------------------
@@ -168,10 +182,90 @@ async def audit() -> dict[str, Any]:
     return {"rows": STORE.audit_dicts()}
 
 
+def _provider_status() -> dict[str, Any]:
+    """What the app would actually use right now, for the panel to show back."""
+    status = effective()
+    return {
+        "provider": status["active"],
+        "requestedProvider": status["requested"],
+        "offline": not status["live"],
+        "client": status["client"],
+        "baseUrl": status.get("baseUrl", ""),
+        "note": status["note"],
+    }
+
+
+@app.get("/api/config")
+async def read_config() -> dict[str, Any]:
+    """The provider settings, and whether they can be changed from here."""
+    return {**runtime_config.snapshot(), "writable": CONFIG_WRITABLE, "status": _provider_status()}
+
+
+@app.put("/api/config")
+async def write_config(body: ConfigRequest) -> dict[str, Any]:
+    """Point the demo at a provider without restarting it.
+
+    Validates before saving, because the failure this replaces is precisely the
+    silent one: set a provider with no endpoint and every agent quietly runs
+    scripted while the badge says otherwise. The reply carries the *effective*
+    status rather than an acknowledgement, so the panel can say whether the
+    change actually took.
+    """
+    if not CONFIG_WRITABLE:
+        raise HTTPException(status_code=403, detail="Settings are read-only here (CHAOS_CONFIG_API=0).")
+
+    name = body.provider.strip().lower()
+    if name not in runtime_config.SELECTABLE_PROVIDERS:
+        raise HTTPException(
+            status_code=422,
+            detail=f"Provider must be one of: {', '.join(runtime_config.SELECTABLE_PROVIDERS)}.",
+        )
+
+    values = {"CHAOS_PROVIDER": name}
+    if name == "foundry":
+        endpoint = body.foundryProjectEndpoint.strip()
+        model = body.foundryModel.strip()
+        if not endpoint or not model:
+            raise HTTPException(
+                status_code=422,
+                detail="Foundry needs both a project endpoint and a model deployment name.",
+            )
+        if not endpoint.startswith("https://"):
+            raise HTTPException(
+                status_code=422,
+                detail="The project endpoint should start with https:// - copy it from the Foundry portal.",
+            )
+        values["FOUNDRY_PROJECT_ENDPOINT"] = endpoint
+        values["FOUNDRY_MODEL"] = model
+
+    persisted = runtime_config.save(values)
+    return {
+        **runtime_config.snapshot(),
+        "writable": True,
+        "persisted": persisted,
+        "status": _provider_status(),
+    }
+
+
+@app.delete("/api/config")
+async def reset_config() -> dict[str, Any]:
+    """Forget the saved settings and use whatever the process was started with."""
+    if not CONFIG_WRITABLE:
+        raise HTTPException(status_code=403, detail="Settings are read-only here (CHAOS_CONFIG_API=0).")
+    runtime_config.clear()
+    return {**runtime_config.snapshot(), "writable": True, "status": _provider_status()}
+
+
 #: Built agent configs, per slug. Reading them means building the workflow, and
 #: a pattern's prompts and tools cannot change while the process is running -
 #: so build once and answer every later visit from here.
 _AGENTS: dict[str, list[dict[str, Any]]] = {}
+
+
+@runtime_config.on_change
+def _forget_cached_agents() -> None:
+    """Agent cards name the client each agent drives, so they go stale too."""
+    _AGENTS.clear()
 
 
 @app.get("/api/agents/{slug}")
