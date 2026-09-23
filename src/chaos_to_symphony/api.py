@@ -492,18 +492,34 @@ if PROXY_DEVUI:
 # Static site
 # --------------------------------------------------------------------------
 
+#: Never serve this site from the browser cache without asking first.
+#:
+#: The filenames never change - there is no build step, so no content hash in
+#: them - and with no explicit freshness header a browser is entitled to invent
+#: one, typically a tenth of the file's age. That is how you end up holding a
+#: new index.html and a cached app.js: the new markup renders a button, the old
+#: script never wires it up, and the click does nothing with no error to show
+#: for it. Two minutes of a conference slot, gone.
+#:
+#: Note this costs a full re-send, not a 304: Starlette answers conditional
+#: requests in StaticFiles, not in the FileResponse these routes return. About
+#: 70KB a page load, over a link that is already serving the demo it belongs
+#: to - a price worth paying for never showing a stale page.
+_REVALIDATE = {"Cache-Control": "no-cache"}
+
+
 if WEB_DIR is not None:
     app.mount("/assets", StaticFiles(directory=WEB_DIR / "assets"), name="assets")
 
     @app.get("/")
     async def index() -> FileResponse:
-        return FileResponse(WEB_DIR / "index.html")
+        return FileResponse(WEB_DIR / "index.html", headers=_REVALIDATE)
 
     @app.get("/{filename}")
     async def static_file(filename: str) -> FileResponse:
         candidate = (WEB_DIR / filename).resolve()
         if candidate.is_file() and WEB_DIR.resolve() in candidate.parents:
-            return FileResponse(candidate)
+            return FileResponse(candidate, headers=_REVALIDATE)
         raise HTTPException(status_code=404, detail="Not found")
 
 else:

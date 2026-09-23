@@ -447,6 +447,20 @@ environment-variable change rather than a rebuild. That matters more than the
 client while the badge claimed a live model. Trim it with
 `INSTALL_EXTRAS='.[openai]' ./infra/deploy.sh` if you only need one.
 
+### If a change does not show up in the browser
+
+The site has no build step, so `app.js` and `styles.css` keep the same names
+forever. A browser handed a file with no freshness header is entitled to invent
+one — commonly a tenth of the file's age — so after a redeploy you can end up
+holding the new `index.html` and a cached `app.js`. The new markup renders a
+control the old script knows nothing about, the click does nothing, and there
+is no error anywhere to explain it.
+
+The app therefore serves `/`, `/app.js` and `/styles.css` with
+`Cache-Control: no-cache`, which means *store it, but ask before using it*. An
+ordinary reload is enough to pick up a redeploy. If you are looking at an older
+deploy that predates this, one hard refresh (Ctrl/Cmd+Shift+R) clears it.
+
 ### Setting the provider from the site
 
 **Settings**, top right. Pick `offline` or `foundry`, paste your project
