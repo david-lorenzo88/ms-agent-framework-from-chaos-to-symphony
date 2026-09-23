@@ -28,6 +28,7 @@ from pydantic import BaseModel
 
 from . import __version__, telemetry
 from .clients import effective, provider
+from .introspect import agents_in
 from .memory import STORE
 from .registry import PATTERNS, TIERS, get
 from .runner import RunSession, execute
@@ -165,6 +166,38 @@ async def devui_entities() -> dict[str, Any]:
 async def audit() -> dict[str, Any]:
     """The in-memory audit trail from the most recent run."""
     return {"rows": STORE.audit_dicts()}
+
+
+#: Built agent configs, per slug. Reading them means building the workflow, and
+#: a pattern's prompts and tools cannot change while the process is running -
+#: so build once and answer every later visit from here.
+_AGENTS: dict[str, list[dict[str, Any]]] = {}
+
+
+@app.get("/api/agents/{slug}")
+async def agents(slug: str) -> dict[str, Any]:
+    """Every agent in one pattern: its prompt, its tools, the client it drives.
+
+    Read back out of the built workflow rather than from anything maintained by
+    hand, so what the audience sees on screen is what the agent was actually
+    given - including the handoff tools, which only exist after the builder has
+    run.
+    """
+    try:
+        spec = get(slug)
+    except KeyError as exc:
+        raise HTTPException(status_code=404, detail=str(exc)) from None
+
+    if slug not in _AGENTS:
+        try:
+            _AGENTS[slug] = agents_in(spec.build())
+        except Exception as exc:
+            # A pattern that cannot be built is a problem for its own run, not
+            # a reason for this panel to 500.
+            logger.exception("Could not introspect the agents in %s", slug)
+            raise HTTPException(status_code=503, detail=f"Could not build {slug}: {exc}") from None
+
+    return {"slug": slug, "pattern": spec.name, "agents": _AGENTS[slug]}
 
 
 @app.get("/api/store")

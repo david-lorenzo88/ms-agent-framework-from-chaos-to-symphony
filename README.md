@@ -91,6 +91,30 @@ down to the customer's approval threshold, quoting what it came down from. The
 modal names the round, because the gate reopening within a second of a click
 otherwise reads as a button that did nothing.
 
+### Seeing what each agent actually is
+
+The **Agents** tab lists every agent in the selected pattern with its system
+prompt, its tools, and the chat client it will really drive — so the box that
+just lit up in the diagram can be opened and shown to an audience.
+
+None of it is written down twice. It is read back out of the `Agent` objects
+the pattern module built, so editing a prompt in `patterns/p04_handoff.py`
+changes what the tab shows and there is nowhere for the two to drift apart.
+Two things fall out of reading the built workflow rather than the source:
+
+- **The handoff tools appear**, and they are not in the source. `HandoffBuilder`
+  generates a `handoff_to_<target>` tool per permitted edge at build time, so
+  the tab shows triage holding four of them and each specialist holding exactly
+  one, back to triage. That *is* the routing policy, and it is worth showing
+  rather than describing.
+- **Agents nested a level down appear too.** Human-in-the-loop wraps its gated
+  participant in an `AgentApprovalExecutor` and sub-workflow composition embeds
+  a whole `Workflow`; both are walked, and anything found inside is tagged.
+
+`make smoke` checks the tab can still find all 31 agents and that each has a
+prompt — the introspection reaches into framework internals, so a dependency
+bump could empty the panel without anything raising an error.
+
 ### Patterns that finish more than one way
 
 Four of the twelve branch, and which branch you get is decided by the case you
@@ -246,6 +270,7 @@ src/chaos_to_symphony/
   api.py          showcase backend (FastAPI + server-sent events)
   devui_app.py    registers all twelve workflows with DevUI
   devui_input.py  makes DevUI ask for a prompt, not a Message form
+  introspect.py   reads each agent's prompt and tools off the built workflow
   patterns/       one module per pattern, p01…p12
 web/              the showcase site: no framework, no CDN, no build step
 deck/             the session deck and the script that builds it

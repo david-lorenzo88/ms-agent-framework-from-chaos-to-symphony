@@ -120,6 +120,8 @@ function select(pattern) {
   fillList($('pAvoid'), pattern.avoidWhen);
   fillList($('pApi'), pattern.mafApi);
   fillEndings(pattern.promptExamples || []);
+  // The agents panel is per pattern, so refresh it if it is the one on screen.
+  if ($('panel-agents').classList.contains('is-on')) loadAgents();
 
   $('diagramHint').textContent = pattern.hasCustomRunner
     ? 'this pattern drives itself — watch the log'
@@ -390,6 +392,7 @@ function wireControls() {
       document.querySelectorAll('.tab').forEach((t) => t.classList.toggle('is-on', t === tab));
       document.querySelectorAll('.panel').forEach((p) =>
         p.classList.toggle('is-on', p.id === 'panel-' + tab.dataset.tab));
+      if (tab.dataset.tab === 'agents') loadAgents();
       if (tab.dataset.tab === 'traces') renderTraces();
       if (tab.dataset.tab === 'audit') loadAudit();
       if (tab.dataset.tab === 'store') loadStore();
@@ -740,6 +743,95 @@ async function loadStore() {
     tr.appendChild(value);
     body.appendChild(tr);
   }
+}
+
+/* ── agents ───────────────────────────────────────────────────── */
+
+/**
+ * The prompt and tools behind each box in the diagram.
+ *
+ * Fetched per pattern rather than shipped with the catalogue, because reading
+ * it means building the workflow - and it only matters when someone opens the
+ * tab. The server caches per slug, so switching back and forth is free.
+ *
+ * Nothing here is written down twice: it is read out of the Agent objects the
+ * pattern module built, which is why the handoff tools show up at all. They do
+ * not exist in the source - HandoffBuilder generates one per permitted edge.
+ */
+async function loadAgents() {
+  if (!state.current) return;
+  const host = $('agentsList');
+  const note = $('agentsNote');
+  const slug = state.current.slug;
+
+  host.innerHTML = '';
+  note.textContent = 'Reading the built workflow…';
+
+  let data;
+  try {
+    const response = await fetch('/api/agents/' + slug);
+    if (!response.ok) throw new Error('HTTP ' + response.status);
+    data = await response.json();
+  } catch (err) {
+    note.textContent = `Could not read the agents for this pattern (${err.message}).`;
+    return;
+  }
+  if (slug !== state.current.slug) return;   // the user moved on while we fetched
+
+  const agents = data.agents || [];
+  if (!agents.length) {
+    note.textContent =
+      'This pattern has no agents — it is built from plain executors, which is rather the point.';
+    return;
+  }
+  const live = agents.some((a) => a.client !== 'ScriptedChatClient');
+  note.textContent =
+    `${agents.length} agent${agents.length === 1 ? '' : 's'} in ${data.pattern}, read back out of the ` +
+    `built workflow — prompts, tools and the client each one drives` +
+    (live ? '.' : '. Offline, so every client is the scripted one.');
+
+  for (const agent of agents) host.appendChild(agentCard(agent));
+}
+
+function agentCard(agent) {
+  const card = el('div', 'agent-card');
+
+  const head = el('div', 'agent-head');
+  head.appendChild(el('span', 'agent-name', agent.name));
+  if (agent.description) head.appendChild(el('span', 'agent-role', agent.description));
+  head.appendChild(el('span',
+    'agent-tag ' + (agent.client === 'ScriptedChatClient' ? 'agent-tag-offline' : 'agent-tag-live'),
+    agent.client));
+  if (agent.structuredOutput) {
+    head.appendChild(el('span', 'agent-tag agent-tag-schema', '→ ' + agent.structuredOutput));
+  }
+  if (agent.nested) {
+    head.appendChild(el('span', 'agent-tag agent-tag-nested', 'nested workflow'));
+  }
+  card.appendChild(head);
+
+  const prompt = el('div', 'agent-section');
+  prompt.appendChild(el('h5', null, 'System prompt'));
+  prompt.appendChild(el('pre', 'agent-prompt', agent.instructions || '(none set)'));
+  card.appendChild(prompt);
+
+  const tools = el('div', 'agent-section');
+  tools.appendChild(el('h5', null, `Tools (${agent.tools.length})`));
+  if (!agent.tools.length) {
+    tools.appendChild(el('p', 'agent-none', 'No tools — this agent works from the conversation alone.'));
+  } else {
+    const list = el('ul', 'agent-tools');
+    for (const tool of agent.tools) {
+      const row = el('li', 'agent-tool' + (tool.kind === 'handoff' ? ' agent-tool-handoff' : ''));
+      row.appendChild(el('code', null, tool.name));
+      if (tool.description) row.appendChild(el('span', 'agent-tool-desc', tool.description));
+      list.appendChild(row);
+    }
+    tools.appendChild(list);
+  }
+  card.appendChild(tools);
+
+  return card;
 }
 
 boot();
