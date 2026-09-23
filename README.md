@@ -130,6 +130,26 @@ its own approval gate is worse than one with a visible browser bar. Press F11
 if you want the chrome gone too; it does the same job without breaking the
 modal.
 
+### Offline gives agents data a real model would not have
+
+Worth knowing before you run this live, because it is the one way offline
+flatters the demo. `ScriptedChatClient` reads the in-memory store directly: ask
+it to "triage exception BFG-24084" and it looks the shipment up and answers
+from the real record. A live model asked the same thing sees a string that
+looks like a reference and nothing else.
+
+That is invisible until an agent's answer decides something. Conditional
+routing's classifier had no tools, so against Foundry it graded every case the
+same safe middle way and every run landed on the medium branch — the routing
+looked broken when the agent had simply never been told anything. It now holds
+`lookup_shipment`, and is told to use it before grading.
+
+The rule that follows: **an agent whose output steers the graph needs its own
+way to get the facts.** An agent late in a chain is usually fine, because the
+agents before it put their findings in the shared conversation — the writers in
+sequential, human-in-the-loop and checkpoint-resume have no tools and do not
+need any. An agent that speaks *first* has only the prompt.
+
 ### The diagram only ever describes the last run
 
 Change the prompt and the diagram clears itself, the run state says *prompt
