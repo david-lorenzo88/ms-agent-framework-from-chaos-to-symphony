@@ -104,6 +104,7 @@
 
       <div class="tabs" role="tablist">
         <button class="tab is-on" data-tab="log"   role="tab">Live log</button>
+        <button class="tab"       data-tab="agents" role="tab">Agents</button>
         <button class="tab"       data-tab="traces" role="tab">Traces</button>
         <button class="tab"       data-tab="devui" role="tab">DevUI</button>
         <button class="tab"       data-tab="audit" role="tab">Audit trail</button>
@@ -111,6 +112,12 @@
       </div>
 
       <div class="panel is-on" id="panel-log"><div class="console" id="console"><p class="console-empty">Press <strong>Run pattern</strong> to stream this workflow's events.</p></div></div>
+
+      <!-- Each agent's prompt and tools, read back out of the built workflow. -->
+      <div class="panel" id="panel-agents">
+        <p class="panel-note" id="agentsNote">Select a pattern to see how its agents are configured.</p>
+        <div class="agents" id="agentsList"></div>
+      </div>
 
       <div class="panel" id="panel-traces">
         <div class="devui-bar">

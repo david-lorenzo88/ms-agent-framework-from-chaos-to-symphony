@@ -3,10 +3,11 @@
 Usage:  python scripts/smoke.py [slug ...]
 
 Exits non-zero if any pattern fails, so CI and a pre-session sanity check are
-the same command. It also checks the two claims the site makes that nothing
+the same command. It also checks the three claims the site makes that nothing
 else would catch: what DevUI would ask for before running a pattern (see
-``chaos_to_symphony.devui_input``), and whether each branching pattern's
-example prompts still reach the endings they advertise.
+``chaos_to_symphony.devui_input``), whether each branching pattern's example
+prompts still reach the endings they advertise, and whether the Agents panel
+can still read every agent's prompt and tools out of the built workflow.
 """
 
 from __future__ import annotations
@@ -130,6 +131,39 @@ async def check_prompt_examples(specs) -> int:
     return failures
 
 
+def check_agent_configs(specs) -> int:
+    """Confirm the Agents panel can still find every agent and its prompt.
+
+    ``introspect`` reaches into the framework's own objects - an executor's
+    ``agent``, an agent's ``default_options`` - so a dependency bump can move
+    them without anything raising. The panel would simply come up empty, which
+    on stage reads as "these patterns have no agents" rather than as a bug.
+    """
+    from chaos_to_symphony.introspect import agents_in
+
+    failures = 0
+    total = 0
+    for spec in specs:
+        try:
+            found = agents_in(spec.build())
+        except Exception as exc:
+            print(f"  [FAIL] {spec.name}: introspection raised {type(exc).__name__}: {exc}")
+            failures += 1
+            continue
+        if not found:
+            print(f"  [FAIL] {spec.name}: no agents found; the Agents panel would be empty")
+            failures += 1
+            continue
+        total += len(found)
+        for agent in found:
+            if not agent["name"] or not agent["instructions"]:
+                print(f"  [FAIL] {spec.name}/{agent['executorId']}: no name or no system prompt")
+                failures += 1
+    if not failures:
+        print(f"  Agents:      {total} agents across {len(specs)} patterns, every one with a prompt")
+    return failures
+
+
 async def main() -> int:
     wanted = sys.argv[1:]
     specs = [get(s) for s in wanted] if wanted else list(PATTERNS)
@@ -144,6 +178,7 @@ async def main() -> int:
     print(f"\n{len(specs) - failures}/{len(specs)} passed")
     failures += check_devui_inputs(specs)
     failures += await check_prompt_examples(specs)
+    failures += check_agent_configs(specs)
     return 1 if failures else 0
 
 

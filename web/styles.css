@@ -369,6 +369,50 @@ code { font-family: var(--mono); font-size: .88em; }
 .panel .grid { display: block; max-height: 360px; overflow-y: auto; }
 .store-note { font-size: .79rem; color: var(--ink-faint); margin: 0 0 .6rem; }
 
+/* ── agents: the prompt and tools behind each box in the diagram ─ */
+
+.panel-note { margin: 0 0 .9rem; font-size: .8rem; color: var(--ink-soft); }
+
+.agents { display: grid; gap: .7rem; max-height: 420px; overflow-y: auto; padding-right: .2rem; }
+
+.agent-card {
+  border: 1px solid var(--line); border-radius: var(--radius-sm);
+  background: var(--paper); padding: .75rem .9rem;
+}
+.agent-head { display: flex; align-items: baseline; gap: .5rem; flex-wrap: wrap; margin-bottom: .1rem; }
+.agent-name { font-family: var(--mono); font-size: .82rem; font-weight: 700; color: var(--navy); }
+.agent-role { font-size: .78rem; color: var(--ink-faint); }
+
+.agent-tag {
+  font-family: var(--mono); font-size: .66rem; letter-spacing: .03em;
+  padding: .1rem .35rem; border-radius: 4px; border: 1px solid var(--line);
+  color: var(--ink-soft); background: #F7FAFD; white-space: nowrap;
+}
+.agent-tag-live    { border-color: var(--mint);       background: #EAF6EC; color: #256B37; }
+.agent-tag-offline { border-color: var(--amber-warm); background: #FFF6E6; color: #8A5A05; }
+.agent-tag-schema  { border-color: var(--steel);      background: #EEF4FA; color: #2C5F7E; }
+.agent-tag-nested  { border-color: #C3CEDC;           background: #F4F7FA; }
+
+.agent-section { margin-top: .55rem; }
+.agent-section h5 {
+  margin: 0 0 .25rem; font-family: var(--mono); font-size: .68rem; font-weight: 700;
+  letter-spacing: .05em; text-transform: uppercase; color: var(--ink-faint);
+}
+.agent-prompt {
+  margin: 0; padding: .5rem .6rem; border-radius: 6px;
+  background: #F7FAFD; border-left: 3px solid var(--steel);
+  font-family: var(--mono); font-size: .74rem; line-height: 1.55; color: var(--ink);
+  white-space: pre-wrap;
+}
+.agent-tools { list-style: none; margin: 0; padding: 0; display: grid; gap: .22rem; }
+.agent-tool { display: flex; gap: .45rem; align-items: baseline; font-size: .75rem; }
+.agent-tool code {
+  font-family: var(--mono); font-size: .73rem; color: var(--navy); white-space: nowrap;
+}
+.agent-tool-handoff code { color: #8A5A05; }
+.agent-tool-desc { color: var(--ink-faint); }
+.agent-none { margin: 0; font-size: .75rem; color: var(--ink-faint); font-style: italic; }
+
 /* ── endings: one prompt per way the pattern can finish ──────── */
 
 .endings {
