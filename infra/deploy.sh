@@ -226,6 +226,55 @@ SECRETS=()
 [ -n "$AZURE_OPENAI_API_KEY" ] && SECRETS+=("azure-openai-key=$AZURE_OPENAI_API_KEY")
 [ -n "$OPENAI_API_KEY" ]       && SECRETS+=("openai-key=$OPENAI_API_KEY")
 
+# ---------------------------------------------------------------------------
+# The service is the source of truth, not the client's connection.
+#
+# `az containerapp create/update` submits the change and then sits on one long
+# poll to management.azure.com. Lose that connection - a VPN, a flaky hotel
+# network, an IPv6 route that black-holes - and the CLI dies with a traceback
+# about `containerappOperationStatuses`, having already *succeeded* in asking
+# for the change. The deploy looks broken while the revision rolls out happily
+# behind it. The environment step above learned this; the app step had not.
+#
+# So: ask, then poll in short calls that can each fail harmlessly, and let the
+# resource's own provisioningState say what happened.
+# ---------------------------------------------------------------------------
+
+app_state() {
+  az containerapp show --name "$APP_NAME" --resource-group "$RESOURCE_GROUP" \
+     --query properties.provisioningState -o tsv --only-show-errors 2>/dev/null || true
+}
+
+wait_for_app() {
+  printf "Waiting for the revision"
+  for _ in $(seq 1 120); do
+    case "$(app_state)" in
+      Succeeded)       echo; return 0 ;;
+      Failed|Canceled) echo; echo "The app reports provisioningState=Failed."; return 1 ;;
+      *)               printf "." ;;
+    esac
+    sleep 5
+  done
+  echo
+  echo "Still provisioning after ten minutes. Nothing is necessarily wrong - check with:"
+  echo "  az containerapp show -n $APP_NAME -g $RESOURCE_GROUP --query properties.provisioningState -o tsv"
+  return 1
+}
+
+# Older containerapp extensions take --no-wait on the environment but not on
+# the app, and an unrecognised argument would be a worse failure than the one
+# being fixed. Probe once; the polling below works either way.
+NO_WAIT=""
+if az containerapp update --help 2>/dev/null | grep -q -- "--no-wait"; then
+  NO_WAIT="--no-wait"
+fi
+
+dropped_the_watch() {
+  echo
+  echo "  The CLI stopped watching the operation - usually the connection to"
+  echo "  management.azure.com, not the deploy. Asking the service directly."
+}
+
 echo
 if az containerapp show --name "$APP_NAME" --resource-group "$RESOURCE_GROUP" \
      -o none --only-show-errors 2>/dev/null; then
@@ -244,7 +293,8 @@ if az containerapp show --name "$APP_NAME" --resource-group "$RESOURCE_GROUP" \
      --cpu "$CPU" --memory "$MEMORY" \
      --min-replicas "$MIN_REPLICAS" --max-replicas "$MAX_REPLICAS" \
      --set-env-vars "${ENV_VARS[@]}" \
-     --only-show-errors -o none
+     $NO_WAIT --only-show-errors -o none || dropped_the_watch
+  wait_for_app
 else
   echo "Creating $APP_NAME..."
   az containerapp create --name "$APP_NAME" --resource-group "$RESOURCE_GROUP" \
@@ -257,7 +307,8 @@ else
      --cpu "$CPU" --memory "$MEMORY" \
      --min-replicas "$MIN_REPLICAS" --max-replicas "$MAX_REPLICAS" \
      --env-vars "${ENV_VARS[@]}" \
-     --only-show-errors -o none
+     $NO_WAIT --only-show-errors -o none || dropped_the_watch
+  wait_for_app
 fi
 
 # ---------------------------------------------------------------------------

@@ -422,6 +422,25 @@ az containerapp env show -n env-chaos-to-symphony -g rg-chaos-to-symphony \
   --query properties.provisioningState -o tsv
 ```
 
+If the traceback ends in `ConnectTimeout` against `management.azure.com`,
+mentioning `containerappOperationStatuses`, **the deploy was not refused**. The
+CLI had already submitted the change and was sitting on one long poll waiting
+for it to finish; what died was that connection, not the rollout.
+
+The script now expects this: it asks for the change, then polls the app's own
+`provisioningState` in short calls that can each fail harmlessly, and reports
+what the service says rather than what the client's socket did. If you hit it
+on an older copy, nothing is lost — check, and re-run:
+
+```bash
+az containerapp show -n chaos-to-symphony -g rg-chaos-to-symphony \
+  --query properties.provisioningState -o tsv
+curl -s https://<your-app>/api/health
+```
+
+`Succeeded` means it landed. Re-running `make deploy` is safe either way — every
+step checks what already exists and resumes.
+
 If the failure is instead a Python traceback ending in `AttributeError` or
 `TypeError` deep inside the CLI, that is a CLI bug rather than your setup.
 `az upgrade` is worth a try; failing that, build and push by hand and point the
