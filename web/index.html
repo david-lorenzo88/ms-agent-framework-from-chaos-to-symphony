@@ -95,6 +95,7 @@
         <textarea id="prompt" rows="2" spellcheck="false" aria-label="Prompt"></textarea>
         <div class="run-buttons">
           <button id="runBtn" class="btn btn-primary">Run pattern</button>
+          <button id="stageBtn" class="btn">Full screen</button>
           <button id="resetBtn" class="btn">Reset data</button>
         </div>
       </div>
@@ -155,6 +156,33 @@
 
   </section>
 </main>
+
+<!-- ─── stage: the log and the diagram, side by side, nothing else ─ -->
+<div class="stage" id="stage" hidden>
+  <header class="stage-head">
+    <div class="stage-title">
+      <span class="stage-number" id="stageNumber"></span>
+      <h2 id="stageName"></h2>
+      <span class="stage-tagline" id="stageTagline"></span>
+    </div>
+    <div class="stage-actions">
+      <span class="stage-state" id="stageState">idle</span>
+      <button class="btn" id="stageExit">Exit full screen</button>
+    </div>
+  </header>
+  <div class="stage-grid">
+    <section class="stage-pane">
+      <h3 class="stage-pane-head">Live log</h3>
+      <!-- The real #console is moved in here on entry and put back on exit,
+           so a run in progress keeps streaming into the same element. -->
+      <div class="stage-slot" id="stageLog"></div>
+    </section>
+    <section class="stage-pane">
+      <h3 class="stage-pane-head">Interaction diagram</h3>
+      <div class="stage-slot" id="stageDiagram"></div>
+    </section>
+  </div>
+</div>
 
 <!-- ─── provider settings ──────────────────────────────────────── -->
 <div class="modal-backdrop" id="settingsModal" hidden>

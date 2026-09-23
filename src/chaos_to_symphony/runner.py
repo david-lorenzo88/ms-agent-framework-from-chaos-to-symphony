@@ -123,7 +123,10 @@ async def _drive_workflow(session: RunSession) -> None:
             if kind == "executor_invoked":
                 if _is_sync_broadcast(event):
                     # Real, but not work. Say so instead of lighting the box.
-                    session.log("info", executor_id or "workflow",
+                    # "muted": still on the record, because it explains why a
+                    # fully connected graph invokes everyone, but dimmed - on a
+                    # four-seat committee these outnumber the actual turns.
+                    session.log("muted", executor_id or "workflow",
                                 "sent the conversation to stay in step - no response requested")
                     continue
                 working.add(executor_id)

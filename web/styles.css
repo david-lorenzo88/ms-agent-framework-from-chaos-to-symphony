@@ -298,6 +298,7 @@ code { font-family: var(--mono); font-size: .88em; }
 .line .t   { color: #5E7BA0; flex: none; width: 3.1rem; text-align: right; }
 .line .src { color: var(--amber); flex: none; min-width: 9.5rem; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
 .line .msg { flex: 1; min-width: 0; word-break: break-word; }
+.line-muted { opacity: .45; }
 .line-warn  .msg { color: #FFD79A; }
 .line-error .msg { color: #FF9A9A; }
 .line-output { border-left: 2px solid var(--mint); padding-left: .55rem; margin: .35rem 0; }
@@ -374,6 +375,64 @@ code { font-family: var(--mono); font-size: .88em; }
 .grid .right { text-align: right; }
 .panel .grid { display: block; max-height: 360px; overflow-y: auto; }
 .store-note { font-size: .79rem; color: var(--ink-faint); margin: 0 0 .6rem; }
+
+/* ── stage: full-screen log and diagram, for the room at the back ─ */
+
+/*
+ * A CSS overlay rather than the Fullscreen API, deliberately. Native
+ * fullscreen renders only the fullscreen element and its descendants, which
+ * would hide the human-in-the-loop approval dialog - a modal that is a sibling
+ * of this overlay - and a demo that silently swallows its own approval gate on
+ * stage is worse than one with a visible browser bar. F11 does the same job
+ * without breaking anything. z-index stays below the modals for that reason.
+ */
+.stage {
+  position: fixed; inset: 0; z-index: 80;
+  display: flex; flex-direction: column;
+  background: linear-gradient(180deg, #FFFFFF 0%, #EEF3F9 100%);
+}
+.stage[hidden] { display: none; }
+
+.stage-head {
+  display: flex; align-items: center; justify-content: space-between; gap: 1rem;
+  padding: .9rem 1.4rem; border-bottom: 1px solid var(--line); background: var(--navy); color: #fff;
+}
+.stage-title { display: flex; align-items: baseline; gap: .7rem; min-width: 0; }
+.stage-number { font-family: var(--mono); font-size: .9rem; color: var(--amber); }
+.stage-title h2 { margin: 0; font-size: 1.35rem; }
+.stage-tagline {
+  font-size: .85rem; color: #BFD3EA;
+  overflow: hidden; text-overflow: ellipsis; white-space: nowrap;
+}
+.stage-actions { display: flex; align-items: center; gap: .8rem; flex-shrink: 0; }
+.stage-state {
+  font-family: var(--mono); font-size: .75rem; letter-spacing: .04em;
+  text-transform: uppercase; color: #BFD3EA;
+}
+.stage-actions .btn { background: rgba(255,255,255,.14); color: #fff; border-color: rgba(255,255,255,.3); }
+.stage-actions .btn:hover { background: rgba(255,255,255,.24); }
+
+.stage-grid {
+  flex: 1; min-height: 0;
+  display: grid; grid-template-columns: minmax(320px, 38%) 1fr; gap: 1rem; padding: 1rem 1.4rem 1.4rem;
+}
+@media (max-width: 900px) { .stage-grid { grid-template-columns: 1fr; grid-template-rows: 1fr 1fr; } }
+
+.stage-pane { display: flex; flex-direction: column; min-height: 0; min-width: 0; }
+.stage-pane-head {
+  margin: 0 0 .5rem; font-family: var(--mono); font-size: .72rem; font-weight: 700;
+  letter-spacing: .06em; text-transform: uppercase; color: var(--ink-faint);
+}
+.stage-slot { flex: 1; min-height: 0; display: flex; }
+
+/* The moved children have to fill the pane instead of the fixed heights they
+   are given in the page they came from. */
+.stage-slot > .console { flex: 1; height: auto; min-height: 0; font-size: .85rem; }
+.stage-slot > .diagram-wrap {
+  flex: 1; min-height: 0; display: flex; align-items: center; justify-content: center;
+  overflow: auto; background: var(--paper);
+}
+.stage-slot > .diagram-wrap > #diagram { max-height: 100%; }
 
 /* ── provider settings ───────────────────────────────────────── */
 
