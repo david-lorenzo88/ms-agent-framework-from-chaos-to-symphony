@@ -160,6 +160,8 @@ function fillEndings(examples) {
     btn.addEventListener('click', () => {
       $('prompt').value = ex.prompt;
       $('prompt').focus();
+      // Setting .value in script fires no input event, so say so explicitly.
+      invalidateRunView();
     });
     const row = el('li');
     row.appendChild(btn);
@@ -393,6 +395,7 @@ function wireControls() {
     });
   });
 
+  $('prompt').addEventListener('input', invalidateRunView);
   $('tracePlumbing').addEventListener('change', renderTraces);
   $('approveBtn').addEventListener('click', () => answerApproval('approve'));
   $('rejectBtn').addEventListener('click', () => answerApproval('reject'));
@@ -467,6 +470,26 @@ function handleFrame(frame) {
       loadStore();
       break;
   }
+}
+
+/**
+ * Drop the last run's result once the prompt no longer matches it.
+ *
+ * The diagram and the run state describe *the run that happened*. Change the
+ * prompt and they are answering a question nobody asked any more - and a green
+ * branch is read as this prompt's answer, not the previous one's. Loading an
+ * example made that easy to hit: one click swaps the prompt and leaves the
+ * previous run lit, so picking "MAJOR INCIDENT DESK" after running the
+ * standard-queue case shows standard_queue in green above it.
+ *
+ * The log is left alone. It names its own shipment in every line, it is the
+ * record of what happened, and wiping it on a keystroke would throw away
+ * something worth reading. The next run clears it anyway.
+ */
+function invalidateRunView() {
+  if (state.source) return;   // a run is in flight - it owns the diagram
+  clearNodes();
+  setRunState('prompt changed');
 }
 
 function stopRun() {
