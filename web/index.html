@@ -21,6 +21,9 @@
   <div class="topbar-status">
     <span class="pill" id="providerPill" title="Which chat client the demos are using">provider …</span>
     <a class="pill pill-link" id="devuiLink" href="#" target="_blank" rel="noopener">DevUI</a>
+    <button class="pill pill-btn" id="settingsBtn" title="Provider settings" aria-label="Provider settings">
+      Settings
+    </button>
   </div>
 </header>
 
@@ -152,6 +155,60 @@
 
   </section>
 </main>
+
+<!-- ─── provider settings ──────────────────────────────────────── -->
+<div class="modal-backdrop" id="settingsModal" hidden>
+  <div class="modal modal-wide" role="dialog" aria-modal="true" aria-labelledby="settingsTitle">
+    <h3 id="settingsTitle">Provider settings</h3>
+    <p class="modal-sub">
+      Point the demos at your own Foundry project without restarting anything.
+      Saved to a file on the server, so it survives a restart.
+    </p>
+
+    <p class="settings-status" id="settingsStatus"></p>
+
+    <form id="settingsForm" autocomplete="off">
+      <div class="field">
+        <label for="cfgProvider">Provider</label>
+        <select id="cfgProvider">
+          <option value="offline">offline — scripted client, no keys, no network</option>
+          <option value="foundry">foundry — Foundry Agent Service</option>
+        </select>
+      </div>
+
+      <div id="foundryFields" hidden>
+        <div class="field">
+          <label for="cfgEndpoint">Project endpoint</label>
+          <input id="cfgEndpoint" type="url" spellcheck="false"
+                 placeholder="https://&lt;resource&gt;.services.ai.azure.com/api/projects/&lt;project&gt;">
+          <p class="field-hint">Foundry portal → your project → Overview.</p>
+        </div>
+        <div class="field">
+          <label for="cfgModel">Model deployment</label>
+          <input id="cfgModel" type="text" spellcheck="false" placeholder="gpt-4o-mini">
+          <p class="field-hint">
+            The <strong>deployment</strong> name, not the model name — the left column of Model deployments.
+          </p>
+        </div>
+        <p class="field-note">
+          No key here: Foundry authenticates with <code>DefaultAzureCredential</code> — your
+          <code>az login</code> locally, the container app's managed identity when deployed. That
+          identity needs a role on the project, or every call fails once this is switched on.
+        </p>
+      </div>
+
+      <p class="settings-error" id="settingsError" hidden></p>
+
+      <div class="modal-actions">
+        <button class="btn btn-primary" type="submit" id="cfgSave">Save</button>
+        <button class="btn" type="button" id="cfgReset">Reset to environment</button>
+        <button class="btn" type="button" id="cfgClose">Close</button>
+      </div>
+    </form>
+
+    <p class="settings-foot" id="settingsFoot"></p>
+  </div>
+</div>
 
 <!-- ─── approval modal (human-in-the-loop) ─────────────────────── -->
 <div class="modal-backdrop" id="approvalModal" hidden>

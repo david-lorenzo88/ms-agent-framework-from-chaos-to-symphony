@@ -10,3 +10,6 @@ build/
 node_modules/
 .DS_Store
 deck/build/
+
+# Provider settings saved from the site.
+.chaos-config.json
