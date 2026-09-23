@@ -20,6 +20,9 @@ from ..tools import CASE_TOOLS
 
 MAX_ROUNDS = 6
 
+#: The seat that is allowed to end the meeting.
+CHAIR = "claims-manager"
+
 
 def committee_selector(state: GroupChatState) -> str:
     """Choose the next speaker.
@@ -30,12 +33,18 @@ def committee_selector(state: GroupChatState) -> str:
     instead - one keyword, same builder.
     """
     names = list(state.participants.keys())
-    # The chair opens and closes; the specialists take the middle rounds.
-    if state.current_round == 0:
+    # The chair opens, every specialist speaks once, then the chair sums up.
+    #
+    # Note it hands back to the chair after the last specialist rather than at
+    # MAX_ROUNDS - 1. Close on the final permitted round and you can no longer
+    # tell which rule ended the meeting: the condition and the cap fire at the
+    # same moment and look identical in the log. Closing early leaves a spare
+    # round the run never needs, so a meeting that ends is a meeting the
+    # termination condition ended - and a cap that fires is a real fault worth
+    # seeing, not the normal path.
+    if state.current_round == 0 or state.current_round >= len(names):
         return names[0]
-    if state.current_round >= MAX_ROUNDS - 1:
-        return names[0]
-    return names[1 + ((state.current_round - 1) % (len(names) - 1))]
+    return names[state.current_round]
 
 
 #: A money figure: "EUR 8,000", "8000 EUR", "8.000 euros" or a bare symbol.
@@ -43,19 +52,31 @@ _AMOUNT = re.compile(r"(?:eur|euros?|\u20ac)\s*[\d][\d.,]*|[\d][\d.,]*\s*(?:eur|
 
 
 def settled(conversation: list[Message]) -> bool:
-    """Stop early once a settlement figure has actually been stated.
+    """Stop once *the chair* has stated a settlement figure.
 
-    Deliberately looks for a *number with a currency on it* rather than for the
-    word "settle". The scripted client is predictable, but a real model will
-    write "I propose a goodwill payment of EUR 8,000" or use a symbol, and a
-    condition keyed on particular English words would simply never fire -
-    leaving max_rounds as the only thing ending the conversation, which is the
-    failure this pattern's own slide warns about.
+    Two halves, and the pattern breaks without either.
+
+    It looks for a *number with a currency on it* rather than for the word
+    "settle". The scripted client is predictable, but a real model will write
+    "I propose a goodwill payment of EUR 8,000" or use a symbol, and a
+    condition keyed on particular English words would never fire - leaving
+    max_rounds as the only thing ending the conversation, which is the failure
+    this pattern's own slide warns about.
+
+    And it insists the figure came from the chair. Money is what this committee
+    argues about, so the specialists quote it constantly: pricing states the
+    modelled exposure, legal the declared value. A condition that accepts any
+    figure from anyone ends the meeting on the first specialist to open their
+    mouth, and a debate that terminates before anyone can disagree is not a
+    debate - it is a one-turn pipeline wearing a group chat's clothes. Which
+    speaker said it is part of the condition, not decoration.
     """
     if not conversation:
         return False
-    text = getattr(conversation[-1], "text", "") or ""
-    return bool(_AMOUNT.search(text))
+    last = conversation[-1]
+    if (getattr(last, "author_name", "") or "") != CHAIR:
+        return False
+    return bool(_AMOUNT.search(getattr(last, "text", "") or ""))
 
 
 def build():

@@ -91,6 +91,45 @@ down to the customer's approval threshold, quoting what it came down from. The
 modal names the round, because the gate reopening within a second of a click
 otherwise reads as a button that did nothing.
 
+### What ends the group chat
+
+The committee is the one pattern where agents react to each other, so it is the
+one that most needs a termination rule you can point at. Five turns: the chair
+opens by framing the decision, each specialist states a position once, and the
+chair sums up with a figure — at which point `settled()` fires and the meeting
+ends with a round to spare.
+
+Two details make that demonstrable rather than accidental:
+
+- **The condition asks who spoke, not just what was said.** Money is what this
+  committee argues about, so the specialists quote it constantly. A condition
+  that accepts any figure from anyone ends the meeting on the first specialist
+  to open their mouth — a one-turn pipeline wearing a group chat's clothes. It
+  is the chair's figure that settles it.
+- **The chair closes early, not on the last permitted round.** Close on the cap
+  and the condition and the cap fire together and look identical in the log.
+  With a spare round left over, a meeting that ends is a meeting the condition
+  ended — and `max_rounds` firing is a real fault worth seeing rather than the
+  normal path.
+
+### Full screen, for the room at the back
+
+**Full screen**, next to *Run pattern*. The live log goes left, the interaction
+diagram right, and everything else goes away. Escape or **Exit full screen**
+returns you to the page with the run intact.
+
+The panes are not copies. The real console and diagram are *moved* into the
+overlay and put back on exit, so a run already in flight keeps streaming into
+the same elements and the diagram keeps lighting up without either knowing
+where it is being displayed.
+
+It is a CSS overlay rather than the Fullscreen API, on purpose: native
+fullscreen renders only the fullscreen element and its descendants, which would
+hide the human-in-the-loop approval dialog — and a demo that silently swallows
+its own approval gate is worse than one with a visible browser bar. Press F11
+if you want the chrome gone too; it does the same job without breaking the
+modal.
+
 ### Why only one specialist lights up
 
 Handoff and group chat build a **fully connected graph**. After each turn the

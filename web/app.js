@@ -49,6 +49,7 @@ async function boot() {
   buildRail();
   wireControls();
   wireSettings();
+  wireStage();
 
   // Deep-link support, so a slide can point straight at one pattern.
   const wanted = new URLSearchParams(location.search).get('pattern');
@@ -108,6 +109,12 @@ function select(pattern) {
   fillEndings(pattern.promptExamples || []);
   // The agents panel is per pattern, so refresh it if it is the one on screen.
   if ($('panel-agents').classList.contains('is-on')) loadAgents();
+  // Same for the stage header, if someone switches pattern while it is up.
+  if (stageIsOpen()) {
+    $('stageNumber').textContent = String(pattern.number).padStart(2, '0');
+    $('stageName').textContent = pattern.name;
+    $('stageTagline').textContent = pattern.tagline;
+  }
 
   $('diagramHint').textContent = pattern.hasCustomRunner
     ? 'this pattern drives itself — watch the log'
@@ -401,7 +408,7 @@ async function run() {
   state.traces = [];
   renderTraces();
   $('runBtn').disabled = true;
-  $('runState').textContent = 'running…';
+  setRunState('running…');
 
   const response = await fetch('/api/run/' + state.current.slug, {
     method: 'POST',
@@ -419,7 +426,7 @@ async function run() {
   const source = new EventSource('/api/stream/' + runId);
   state.source = source;
   source.onmessage = (event) => handleFrame(JSON.parse(event.data));
-  source.onerror = () => { stopRun(); $('runState').textContent = 'disconnected'; };
+  source.onerror = () => { stopRun(); setRunState('disconnected'); };
 }
 
 function handleFrame(frame) {
@@ -454,7 +461,7 @@ function handleFrame(frame) {
       renderAudit(frame.rows);
       break;
     case 'end':
-      $('runState').textContent = 'complete';
+      setRunState('complete');
       $('runBtn').disabled = false;
       stopRun();
       loadStore();
@@ -486,7 +493,7 @@ function resetConsole() {
   const box = $('console');
   box.innerHTML = '';
   block = null;
-  $('runState').textContent = 'idle';
+  setRunState('idle');
   box.appendChild(el('p', 'console-empty',
     'Press Run pattern to stream this workflow\'s events.'));
 }
@@ -729,6 +736,73 @@ async function loadStore() {
     tr.appendChild(value);
     body.appendChild(tr);
   }
+}
+
+/* ── stage ────────────────────────────────────────────────────── */
+
+/**
+ * Full-screen log and diagram, for the people at the back of the room.
+ *
+ * The panes are not copies. The real #console and .diagram-wrap are *moved*
+ * into the stage and put back on exit, so a run already in flight keeps
+ * streaming into the same elements and the diagram keeps lighting up without
+ * any of it knowing where it is being displayed. Copies would need syncing,
+ * and a diagram that disagrees with itself is worse than no diagram.
+ */
+const stageHomes = new Map();
+
+function moveToStage(el, host) {
+  if (!stageHomes.has(el)) stageHomes.set(el, { parent: el.parentNode, next: el.nextSibling });
+  host.appendChild(el);
+}
+
+function sendHome(el) {
+  const home = stageHomes.get(el);
+  if (home) home.parent.insertBefore(el, home.next);
+}
+
+function stageIsOpen() {
+  return !$('stage').hidden;
+}
+
+function enterStage() {
+  if (!state.current || stageIsOpen()) return;
+
+  $('stageNumber').textContent = String(state.current.number).padStart(2, '0');
+  $('stageName').textContent = state.current.name;
+  $('stageTagline').textContent = state.current.tagline;
+  $('stageState').textContent = $('runState').textContent;
+
+  moveToStage($('console'), $('stageLog'));
+  moveToStage(document.querySelector('.diagram-wrap'), $('stageDiagram'));
+
+  $('stage').hidden = false;
+  $('stageExit').focus();
+  // Keep the page behind from scrolling under the overlay.
+  document.body.style.overflow = 'hidden';
+}
+
+function exitStage() {
+  if (!stageIsOpen()) return;
+  $('stage').hidden = true;
+  document.body.style.overflow = '';
+  sendHome($('console'));
+  sendHome(document.querySelector('.diagram-wrap'));
+  $('stageBtn').focus();
+}
+
+function wireStage() {
+  $('stageBtn').addEventListener('click', enterStage);
+  $('stageExit').addEventListener('click', exitStage);
+  document.addEventListener('keydown', (event) => {
+    if (event.key === 'Escape' && stageIsOpen()) exitStage();
+  });
+}
+
+/** Mirror the run state into the stage header, which has its own copy of it. */
+function setRunState(text) {
+  $('runState').textContent = text;
+  $('stageState').textContent = text;
 }
 
 /* ── provider settings ────────────────────────────────────────── */

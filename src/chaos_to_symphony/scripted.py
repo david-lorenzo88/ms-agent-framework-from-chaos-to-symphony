@@ -110,12 +110,17 @@ SEND_BACK_INSTRUCTION = (
 
 
 def _persona_key(name: str) -> str:
-    """Map an agent name onto a persona voice key."""
+    """Map an agent name onto a persona voice key, most specific first.
+
+    Longest match rather than first match: "claims-manager" contains both
+    "claims" and "manager", and taking whichever happened to be declared first
+    in the dict made the chair of the claims committee speak as a claims
+    handler - dictionary order silently deciding an agent's voice. The longer
+    key is the more specific one, so it wins.
+    """
     lowered = (name or "").lower()
-    for key in _VOICES:
-        if key in lowered:
-            return key
-    return "_fallback"
+    matches = [key for key in _VOICES if key in lowered]
+    return max(matches, key=len) if matches else "_fallback"
 
 
 def _voice(name: str) -> str:
@@ -178,6 +183,11 @@ def _top_ranked_row(messages: Sequence[Message]) -> str | None:
     """The first row of a ranked worklist, if one was handed to this agent."""
     match = _RANK_RE.search(_conversation_text(messages))
     return match.group(1).strip() if match else None
+
+
+def _prior_speakers(messages: Sequence[Message]) -> int:
+    """How many agent turns are already in this thread."""
+    return sum(1 for m in messages if str(getattr(m, "role", "")).endswith("assistant"))
 
 
 #: The offer line this client writes, and reads back on the next round.
@@ -279,6 +289,27 @@ def _compose(persona: str, messages: Sequence[Message]) -> str:
         top = _top_ranked_row(messages)
         if top:
             return head + " Worst case on the desk today: " + top
+    elif key in {"manager"}:
+        # A chair opens by framing the decision and closes by naming a number.
+        # Both are the same persona, and the transcript is what tells them
+        # apart - which is also what lets the committee's termination condition
+        # fire on the summing-up rather than on the first specialist to mention
+        # money in passing.
+        if _prior_speakers(messages) < 2:
+            # Not a figure anywhere in the opening, deliberately: the committee
+            # stops when the chair names a number, so the chair naming one
+            # while framing the question would end the meeting before it began.
+            facts.append(
+                f"Decision before the committee: what goodwill, if any, to offer on the "
+                f"{customer.tier if customer else 'unknown'} tier. Specialists to state their positions first."
+            )
+        else:
+            ceiling = policy.max_goodwill_eur if policy else 0
+            agreed = min(shipment.declared_value_eur // 10, ceiling)
+            facts.append(
+                f"The specialists have spoken. Settlement agreed at EUR {agreed:,}, within the "
+                f"EUR {ceiling:,} ceiling for the {customer.tier if customer else 'unknown'} tier."
+            )
     elif key in {"settle"}:
         figure, previous = _settlement_offer(shipment, policy, messages)
         ceiling = policy.max_goodwill_eur if policy else 0
