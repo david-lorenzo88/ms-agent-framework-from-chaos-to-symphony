@@ -3,11 +3,12 @@
 Usage:  python scripts/smoke.py [slug ...]
 
 Exits non-zero if any pattern fails, so CI and a pre-session sanity check are
-the same command. It also checks the three claims the site makes that nothing
-else would catch: what DevUI would ask for before running a pattern (see
+the same command. It also checks four claims that nothing else would catch:
+what DevUI would ask for before running a pattern (see
 ``chaos_to_symphony.devui_input``), whether each branching pattern's example
-prompts still reach the endings they advertise, and whether the Agents panel
-can still read every agent's prompt and tools out of the built workflow.
+prompts still reach the endings they advertise, whether the Agents panel can
+still read every agent's prompt and tools out of the built workflow, and
+whether the group chat can still be ended early by a talkative chair.
 """
 
 from __future__ import annotations
@@ -164,6 +165,59 @@ def check_agent_configs(specs) -> int:
     return failures
 
 
+def check_group_chat_termination() -> int:
+    """Confirm the committee cannot settle before anyone has argued.
+
+    Offline never exercises this. The scripted chair is written to open without
+    a figure, so a condition reading only the text passes every local run - and
+    then a live model, asked to open the meeting, writes the whole committee
+    itself in one turn ("Specialist 2, Commercial: the declared value is EUR
+    96,500"), the chair's opening carries a figure, and the meeting ends at
+    round 0 with three agents who never spoke.
+
+    Provider-independent, because it is the condition being tested rather than
+    any client: hand it transcripts and see what it says.
+    """
+    from agent_framework import Message
+
+    from chaos_to_symphony.patterns.p03_group_chat import CHAIR, settled
+
+    def turn(author: str | None, text: str) -> Message:
+        message = Message("assistant" if author else "user", contents=[text])
+        if author:
+            message.author_name = author
+        return message
+
+    monologue = (
+        "Decision to be made: whether BFG-24082 merits compensation.\n"
+        "Specialist 2, Commercial: the declared value is EUR 96,500."
+    )
+    cases = [
+        ("chair opens alone while quoting a figure",
+         [turn(None, "Agree a settlement."), turn(CHAIR, monologue)], False),
+        ("a specialist quotes money mid-debate",
+         [turn(None, "x"), turn(CHAIR, monologue),
+          turn("pricing-specialist", "Modelled exposure EUR 8,041.")], False),
+        ("chair sums up after the specialists",
+         [turn(None, "x"), turn(CHAIR, monologue),
+          turn("pricing-specialist", "Modelled exposure EUR 8,041."),
+          turn(CHAIR, "Settlement agreed at EUR 9,650.")], True),
+        ("chair sums up naming no figure",
+         [turn(None, "x"), turn(CHAIR, monologue),
+          turn("pricing-specialist", "Modelled exposure EUR 8,041."),
+          turn(CHAIR, "Let us reconvene tomorrow.")], False),
+    ]
+
+    failures = 0
+    for label, conversation, expected in cases:
+        if settled(conversation) is not expected:
+            print(f"  [FAIL] group chat termination: {label} -> wanted {expected}")
+            failures += 1
+    if not failures:
+        print(f"  Group chat:  settles only after a real debate ({len(cases)} transcripts)")
+    return failures
+
+
 async def main() -> int:
     wanted = sys.argv[1:]
     specs = [get(s) for s in wanted] if wanted else list(PATTERNS)
@@ -179,6 +233,7 @@ async def main() -> int:
     failures += check_devui_inputs(specs)
     failures += await check_prompt_examples(specs)
     failures += check_agent_configs(specs)
+    failures += check_group_chat_termination()
     return 1 if failures else 0
 
 

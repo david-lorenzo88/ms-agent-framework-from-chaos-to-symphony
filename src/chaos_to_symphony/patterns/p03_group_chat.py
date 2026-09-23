@@ -76,6 +76,21 @@ def settled(conversation: list[Message]) -> bool:
     last = conversation[-1]
     if (getattr(last, "author_name", "") or "") != CHAIR:
         return False
+
+    # And nobody settles a debate that has not happened yet.
+    #
+    # The two checks above read the *text*, and a live model writes whatever it
+    # likes into it. Asked to open the meeting, one wrote the whole committee
+    # itself in a single turn - "Specialist 1, Operations: ...", "Specialist 2,
+    # Commercial: the declared value is EUR 96,500" - and that opening carried a
+    # figure from the chair, so the meeting ended at round 0 with three agents
+    # who never spoke. Whether anyone else has taken a turn is a fact about the
+    # transcript rather than about the prose, and no amount of fluent writing
+    # can fake it.
+    others = {(getattr(m, "author_name", "") or "") for m in conversation} - {"", CHAIR}
+    if not others:
+        return False
+
     return bool(_AMOUNT.search(getattr(last, "text", "") or ""))
 
 
@@ -86,8 +101,13 @@ def build():
         name="claims-manager",
         description="Chairs the committee and records the settlement.",
         instructions=(
-            "You chair the claims committee. Open by stating the decision to be made. When the specialists "
-            "have spoken, state a single settlement figure in EUR and the reason for it."
+            "You chair the claims committee. You speak twice and only twice, and the specialists are "
+            "separate agents who each take their own turn.\n"
+            "Your first turn: state the decision the committee has to make, in one or two sentences. "
+            "Name no figure - nobody has argued yet - and do not write the specialists' contributions "
+            "for them.\n"
+            "Your last turn: having read what they actually said, state a single settlement figure in "
+            "EUR and the reason for it."
         ),
         tools=CASE_TOOLS,
     )
