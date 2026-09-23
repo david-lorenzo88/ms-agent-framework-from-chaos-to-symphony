@@ -106,6 +106,13 @@ Two details make that demonstrable rather than accidental:
   that accepts any figure from anyone ends the meeting on the first specialist
   to open their mouth — a one-turn pipeline wearing a group chat's clothes. It
   is the chair's figure that settles it.
+- **And it asks whether a debate happened at all.** Reading the text is not
+  enough once a real model is writing it: asked to open the meeting, one wrote
+  the entire committee itself in a single turn — *"Specialist 2, Commercial:
+  the declared value is EUR 96,500"* — so the chair's opening carried a figure
+  and the meeting ended at round 0 with three agents who never spoke. Whether
+  anyone else has taken a turn is a fact about the transcript, not about the
+  prose, and no amount of fluent writing can fake it.
 - **The chair closes early, not on the last permitted round.** Close on the cap
   and the condition and the cap fire together and look identical in the log.
   With a spare round left over, a meeting that ends is a meeting the condition
