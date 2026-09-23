@@ -91,6 +91,22 @@ down to the customer's approval threshold, quoting what it came down from. The
 modal names the round, because the gate reopening within a second of a click
 otherwise reads as a button that did nothing.
 
+### Why only one specialist lights up
+
+Handoff and group chat build a **fully connected graph**. After each turn the
+active agent broadcasts the conversation to every other participant so their
+histories stay in step — an `AgentExecutorRequest` with `should_respond=False`.
+Each recipient really is invoked: it files the messages and returns without
+calling its model.
+
+So `executor_invoked` and `executor_completed` fire for every participant on
+every turn. They are honest events, but they answer *who received a message*,
+not *who worked the case* — and lighting the diagram off them turned all four
+specialists green on the one pattern whose whole point is that exactly one was
+chosen. The runner now skips the broadcasts when colouring boxes and says so in
+the log instead, so the mechanism is still visible without the diagram claiming
+work that never happened.
+
 ### Seeing what each agent actually is
 
 The **Agents** tab lists every agent in the selected pattern with its system

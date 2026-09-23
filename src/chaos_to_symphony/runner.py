@@ -108,6 +108,11 @@ async def _drive_workflow(session: RunSession) -> None:
     stream = workflow.run(session.prompt, stream=True)
     responses: dict[str, Any] | None = None
 
+    #: Executors that were actually asked to do something, as opposed to ones
+    #: handed a copy of the conversation to keep their history in step. Only
+    #: the first kind should light up in the diagram - see _is_sync_broadcast.
+    working: set[str] = set()
+
     while True:
         pending: dict[str, Any] = {}
         async for event in stream:
@@ -116,11 +121,21 @@ async def _drive_workflow(session: RunSession) -> None:
             node = session.node_for(executor_id)
 
             if kind == "executor_invoked":
+                if _is_sync_broadcast(event):
+                    # Real, but not work. Say so instead of lighting the box.
+                    session.log("info", executor_id or "workflow",
+                                "sent the conversation to stay in step - no response requested")
+                    continue
+                working.add(executor_id)
                 if node:
                     session.activate(node, "active")
                 session.log("info", executor_id or "workflow", "invoked")
 
             elif kind == "executor_completed":
+                # The broadcast recipients complete too, and completing is what
+                # turns a box green. Only close the ones that opened.
+                if executor_id and executor_id not in working:
+                    continue
                 if node:
                     session.activate(node, "done")
                 session.log("info", executor_id or "workflow", "completed")
@@ -170,6 +185,23 @@ async def _drive_workflow(session: RunSession) -> None:
         session.log("info", "workflow", f"resuming with {len(pending)} human response(s)")
         responses = pending
         stream = workflow.run(stream=True, responses=responses)
+
+
+def _is_sync_broadcast(event: Any) -> bool:
+    """True when an executor was only handed the conversation to stay in step.
+
+    Handoff and group chat build a fully connected graph: after each turn the
+    active agent broadcasts the conversation to every other participant so
+    their histories match, as an ``AgentExecutorRequest`` with
+    ``should_respond=False``. Each recipient really is invoked - it files the
+    messages and returns without calling its model.
+
+    Those are honest framework events, but they answer "who received a
+    message", not "who worked the case". Lighting the diagram off them turns
+    every specialist green on a pattern whose entire point is that exactly one
+    of them was chosen, which is the opposite of the lesson.
+    """
+    return getattr(getattr(event, "data", None), "should_respond", None) is False
 
 
 async def _ask_human(session: RunSession, request_id: str, event: Any) -> str:
