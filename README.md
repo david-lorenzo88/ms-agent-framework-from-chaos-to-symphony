@@ -130,6 +130,18 @@ its own approval gate is worse than one with a visible browser bar. Press F11
 if you want the chrome gone too; it does the same job without breaking the
 modal.
 
+### The diagram only ever describes the last run
+
+Change the prompt and the diagram clears itself, the run state says *prompt
+changed*, and nothing is claimed until you press **Run pattern** again.
+
+That is not cosmetic. Loading an example is one click, and without it you get
+the previous run's branch sitting in green above a prompt that would route
+somewhere else entirely — pick *MAJOR INCIDENT DESK* after running the
+standard-queue case and `standard_queue` stays lit, which reads as conditional
+routing being broken. The log is left alone: every line names its own shipment,
+it is the record of what actually happened, and the next run clears it anyway.
+
 ### Why only one specialist lights up
 
 Handoff and group chat build a **fully connected graph**. After each turn the
