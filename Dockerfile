@@ -23,11 +23,16 @@ WORKDIR /app
 COPY pyproject.toml README.md ./
 COPY src/ ./src/
 
-# Include the OpenAI provider (which also serves Azure OpenAI) so the deployed
-# app can be switched to a real model with an environment variable instead of
-# a rebuild. It adds a few MB and is inert unless CHAOS_PROVIDER says otherwise
-# - without it, setting CHAOS_PROVIDER=azure silently runs scripted.
-ARG INSTALL_EXTRAS=".[openai]"
+# Both live providers are built in, so the deployed app can be switched to a
+# real model with an environment variable instead of a rebuild: openai serves
+# OpenAI and Azure OpenAI, foundry serves the Foundry Agent Service. They are
+# inert unless CHAOS_PROVIDER says otherwise, and the alternative is worse than
+# the ~30MB - an extra the image lacks does not fail, it falls back, so
+# CHAOS_PROVIDER=foundry would quietly run the scripted client while the badge
+# claimed a live model. Override to trim the image if you only need one:
+#
+#   az acr build --build-arg INSTALL_EXTRAS='.[openai]' ...
+ARG INSTALL_EXTRAS=".[openai,foundry]"
 RUN pip install --no-cache-dir "${INSTALL_EXTRAS}"
 
 COPY web/ ./web/
