@@ -106,6 +106,15 @@ Two details make that demonstrable rather than accidental:
   that accepts any figure from anyone ends the meeting on the first specialist
   to open their mouth — a one-turn pipeline wearing a group chat's clothes. It
   is the chair's figure that settles it.
+- **Nobody gets the floor twice running.** The orchestrator broadcasts a turn
+  to everyone *except* the agent that produced it, then asks the next speaker
+  to respond with an empty message list, trusting the broadcast to have carried
+  the conversation. Select the same agent twice and it was sent nothing, so a
+  real provider is handed a completion with no messages and refuses —
+  `ChatClientInvalidRequestException: Messages are required for chat
+  completions`. If the chair's summing-up does not settle the meeting, the
+  floor therefore goes back round the specialists, which is what makes
+  `max_rounds` a backstop you can actually reach rather than a crash.
 - **And it asks whether a debate happened at all.** Reading the text is not
   enough once a real model is writing it: asked to open the meeting, one wrote
   the entire committee itself in a single turn — *"Specialist 2, Commercial:

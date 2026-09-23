@@ -213,8 +213,33 @@ def check_group_chat_termination() -> int:
         if settled(conversation) is not expected:
             print(f"  [FAIL] group chat termination: {label} -> wanted {expected}")
             failures += 1
+
+    # And nobody gets the floor twice running. The orchestrator broadcasts a
+    # turn to everyone except the agent that produced it, then asks the next
+    # speaker to respond with an empty message list. Pick the same agent twice
+    # and it was sent nothing, so a real provider is handed a completion with
+    # no messages and refuses: "Messages are required for chat completions".
+    # Offline never reaches it - the scripted chair always settles the meeting
+    # at its summing-up - so only a check like this one catches it.
+    from types import SimpleNamespace
+
+    from chaos_to_symphony.patterns.p03_group_chat import MAX_ROUNDS, committee_selector
+
+    seats = ["claims-manager", "pricing-specialist", "legal-counsel", "ops-account-lead"]
+    picks = [
+        committee_selector(
+            SimpleNamespace(current_round=r, participants=dict.fromkeys(seats), conversation=[])
+        )
+        for r in range(MAX_ROUNDS + 4)
+    ]
+    repeats = [r for r in range(1, len(picks)) if picks[r] == picks[r - 1]]
+    if repeats:
+        print(f"  [FAIL] group chat selector picks the same speaker twice at round(s) {repeats}")
+        failures += 1
+
     if not failures:
-        print(f"  Group chat:  settles only after a real debate ({len(cases)} transcripts)")
+        print(f"  Group chat:  settles only after a real debate ({len(cases)} transcripts), "
+              f"never the same speaker twice")
     return failures
 
 
