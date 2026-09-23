@@ -470,6 +470,17 @@ az containerapp env show -n env-chaos-to-symphony -g rg-chaos-to-symphony \
   --query properties.provisioningState -o tsv
 ```
 
+If the traceback ends in `JSONDecodeError: Expecting property name enclosed in
+double quotes`, that is not a malformed request. Azure Resource Manager answers
+a transient outage with a **503 and an HTML page** — *"Our services aren't
+available right now"*, with `Ref A/B/C` underneath — and the CLI's own error
+handler then dies trying to `json.loads()` that HTML. The real error is further
+up the traceback, and it is Azure's, not yours.
+
+The script retries the short ARM calls four times over about half a minute,
+which covers a blip. If it gives up, ARM is genuinely unavailable: wait and
+re-run, every step resumes.
+
 If the traceback ends in `ConnectTimeout` against `management.azure.com`,
 mentioning `containerappOperationStatuses`, **the deploy was not refused**. The
 CLI had already submitted the change and was sitting on one long poll waiting
