@@ -187,8 +187,8 @@ SLIDES: list[tuple[str, dict]] = [
         "title": "WHAT YOU ARE ABOUT TO SEE",
         "cols": [
             ("The setup", [
-                "Baltic Freight Group — a freight forwarder with twenty shipments in trouble",
-                "Every pattern works the same exception data",
+                "Baltic Travel Agency — a Riga travel agency with twenty bookings, thirteen in trouble",
+                "Every pattern works the same book of trips",
                 "The whole database is in process memory",
                 "DevUI shows the framework's own view: graph, events, streamed interaction",
             ]),
