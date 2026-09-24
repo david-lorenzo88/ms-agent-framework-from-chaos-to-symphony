@@ -1,7 +1,8 @@
 """Pattern 3 - Group Chat.
 
-A claims committee argues about a goodwill payment in one shared thread, with
-an orchestrator deciding who speaks next and a hard round cap ending it.
+A customer-care committee argues about what to pay a couple whose honeymoon
+suite was sold twice, in one shared thread, with an orchestrator deciding who
+speaks next and a hard round cap ending it.
 
 The point on stage: this is the only core pattern where agents *react* to each
 other, and that is exactly why it needs the tightest termination rules.
@@ -14,14 +15,14 @@ import re
 from agent_framework import Agent, Message
 from agent_framework.orchestrations import GroupChatBuilder, GroupChatState
 
-from ..base import DiagramEdge, DiagramNode, PatternSpec
+from ..base import CaseBrief, CaseFact, DiagramEdge, DiagramNode, PatternSpec
 from ..clients import chat_client
-from ..tools import CASE_TOOLS
+from ..tools import CASE_TOOLS, estimate_compensation, get_customer, lookup_booking
 
 MAX_ROUNDS = 6
 
 #: The seat that is allowed to end the meeting.
-CHAIR = "claims-manager"
+CHAIR = "care-manager"
 
 
 def committee_selector(state: GroupChatState) -> str:
@@ -84,7 +85,7 @@ def settled(conversation: list[Message]) -> bool:
 
     And it insists the figure came from the chair. Money is what this committee
     argues about, so the specialists quote it constantly: pricing states the
-    modelled exposure, legal the declared value. A condition that accepts any
+    price difference, legal the reduction the law makes us owe. A condition that accepts any
     figure from anyone ends the meeting on the first specialist to open their
     mouth, and a debate that terminates before anyone can disagree is not a
     debate - it is a one-turn pipeline wearing a group chat's clothes. Which
@@ -100,10 +101,9 @@ def settled(conversation: list[Message]) -> bool:
     #
     # The two checks above read the *text*, and a live model writes whatever it
     # likes into it. Asked to open the meeting, one wrote the whole committee
-    # itself in a single turn - "Specialist 1, Operations: ...", "Specialist 2,
-    # Commercial: the declared value is EUR 96,500" - and that opening carried a
-    # figure from the chair, so the meeting ended at round 0 with three agents
-    # who never spoke. Whether anyone else has taken a turn is a fact about the
+    # itself in a single turn - every specialist's position, figures and all -
+    # and that opening carried a figure from the chair, so the meeting ended
+    # at round 0 with three agents who never spoke. Whether anyone else has taken a turn is a fact about the
     # transcript rather than about the prose, and no amount of fluent writing
     # can fake it.
     others = {(getattr(m, "author_name", "") or "") for m in conversation} - {"", CHAIR}
@@ -114,47 +114,54 @@ def settled(conversation: list[Message]) -> bool:
 
 
 def build():
-    """A four-seat claims committee under a chair, capped at six rounds."""
+    """A four-seat customer-care committee under a chair, capped at six rounds."""
     chair = Agent(
-        client=chat_client("claims-manager"),
-        name="claims-manager",
+        client=chat_client("care-manager"),
+        name="care-manager",
         description="Chairs the committee and records the settlement.",
         instructions=(
-            "You chair the claims committee. You speak twice and only twice, and the specialists are "
+            "You chair the customer-care committee. You speak twice and only twice, and the specialists are "
             "separate agents who each take their own turn.\n"
-            "Your first turn: state the decision the committee has to make, in one or two sentences. "
-            "Name no figure - nobody has argued yet - and do not write the specialists' contributions "
-            "for them.\n"
+            "Your first turn: look the booking up, then state the decision the committee has to make, in one "
+            "or two sentences. Name no figure - nobody has argued yet - and do not write the specialists' "
+            "contributions for them.\n"
             "Your last turn: having read what they actually said, state a single settlement figure in "
             "EUR and the reason for it."
         ),
         tools=CASE_TOOLS,
     )
-    finance = Agent(
+    pricing = Agent(
         client=chat_client("pricing-specialist"),
         name="pricing-specialist",
         description="Argues the financial position.",
-        instructions="Argue the money. Push back on any figure above the goodwill ceiling for this tier.",
-        tools=CASE_TOOLS,
+        instructions=(
+            "Argue the money. Start from what was paid for and not delivered, and push back on any figure "
+            "above the goodwill ceiling for this tier."
+        ),
+        tools=[lookup_booking, estimate_compensation],
     )
     legal = Agent(
         client=chat_client("legal-counsel"),
         name="legal-counsel",
-        description="Argues liability and precedent.",
-        instructions="Argue liability and precedent. Warn when a settlement would set an expensive precedent.",
-        tools=CASE_TOOLS,
+        description="Argues liability as package organiser.",
+        instructions=(
+            "Argue liability. Under the Package Travel Directive the organiser owes a price reduction for "
+            "any service not delivered as booked; say what that floor is, and warn against admitting more "
+            "in writing."
+        ),
+        tools=[lookup_booking],
     )
     account = Agent(
-        client=chat_client("ops-account-lead"),
-        name="ops-account-lead",
-        description="Argues the commercial relationship.",
-        instructions="Argue the relationship. Weigh annual volume and churn risk against the settlement cost.",
-        tools=CASE_TOOLS,
+        client=chat_client("account-lead"),
+        name="account-lead",
+        description="Argues the customer relationship.",
+        instructions="Argue the relationship. Weigh what the customer spends with us, and what they will tell people.",
+        tools=[lookup_booking, get_customer],
     )
 
     return GroupChatBuilder(
         name="GroupChat",
-        participants=[chair, finance, legal, account],
+        participants=[chair, pricing, legal, account],
         selection_func=committee_selector,
         orchestrator_name="committee-chair",
         termination_condition=settled,
@@ -195,14 +202,39 @@ SPEC = PatternSpec(
         "Two defences, and you want both - a hard max_rounds ceiling as the backstop, and a termination "
         "condition that tests for the artefact you actually wanted rather than for a sentiment."
     ),
-    scenario="BFG-24082: a reefer failure on chilled salmon to Hamburg. Gold-tier customer, EUR 12,000 ceiling.",
-    default_prompt="Shipment BFG-24082 suffered a temperature excursion. Agree a settlement figure.",
+    scenario="BTA-26103: a honeymoon suite in Dubrovnik, sold twice. Gold tier, EUR 2,500 goodwill ceiling.",
+    case=CaseBrief(
+        about=(
+            "Elīna and Mārtiņš Ozols booked the Sea View Suite at Hotel Excelsior Dubrovnik for their honeymoon. The "
+            "suite had been sold twice, and they spent five of their seven nights in a Superior Room before it came "
+            "free. They are home now, and they have written. Four people have to agree what Baltic Travel Agency pays, "
+            "and they want different things: pricing wants the figure low, legal knows the Package Travel Directive "
+            "makes a price reduction owed, and the account lead knows a honeymoon story gets told for years."
+        ),
+        why=(
+            "This is a decision that has to show its reasoning, which is exactly what a single accumulating thread "
+            "gives you. Every participant reads every prior turn, so positions get challenged and revised in the open "
+            "rather than averaged away in private. Watch the chair: it opens without a figure, lets each specialist "
+            "argue, and only then puts a number on it. The run ends on a structural condition - the chair spoke last, "
+            "at least one specialist spoke before it, and the closing text carries an actual currency amount - not on "
+            "anybody sounding satisfied."
+        ),
+        facts=(
+            CaseFact("Booking", "BTA-26103"),
+            CaseFact("Couple", "Elīna and Mārtiņš Ozols, gold tier"),
+            CaseFact("Booked", "Hotel Excelsior Dubrovnik, Sea View Suite, 7 nights"),
+            CaseFact("What they got", "A Superior Room for 5 nights - EUR 360 a night against EUR 640"),
+            CaseFact("Not delivered", "EUR 1,400"),
+            CaseFact("The constraint", "Goodwill is capped at EUR 2,500"),
+        ),
+    ),
+    default_prompt="Booking BTA-26103: the honeymoon suite was sold twice. Agree a settlement figure.",
     nodes=(
         DiagramNode("chair", "committee-chair", "orchestrator"),
-        DiagramNode("mgr", "claims-manager", "agent"),
+        DiagramNode("mgr", "care-manager", "agent"),
         DiagramNode("fin", "pricing-specialist", "agent"),
         DiagramNode("legal", "legal-counsel", "agent"),
-        DiagramNode("acct", "ops-account-lead", "agent"),
+        DiagramNode("acct", "account-lead", "agent"),
         DiagramNode("thread", "Shared thread", "store"),
     ),
     edges=(

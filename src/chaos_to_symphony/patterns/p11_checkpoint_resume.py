@@ -16,10 +16,10 @@ from __future__ import annotations
 from agent_framework import Agent, InMemoryCheckpointStorage
 from agent_framework.orchestrations import SequentialBuilder
 
-from ..base import DiagramEdge, DiagramNode, PatternSpec
+from ..base import CaseBrief, CaseFact, DiagramEdge, DiagramNode, PatternSpec
 from ..clients import chat_client
 from ..memory import STORE
-from ..tools import CASE_TOOLS
+from ..tools import INTAKE_TOOLS, PLANNER_TOOLS, estimate_compensation
 
 #: Shared between the original run and the resumed one. In production this is
 #: the only piece that has to outlive the process.
@@ -37,21 +37,27 @@ def _participants() -> list[Agent]:
             client=chat_client("intake-agent"),
             name="intake-agent",
             description="Establishes the facts.",
-            instructions="State the facts of the exception in two sentences.",
-            tools=CASE_TOOLS,
+            instructions="Look the booking up and state the facts of the incident in two sentences.",
+            tools=INTAKE_TOOLS,
         ),
         Agent(
             client=chat_client("pricing-specialist"),
             name="pricing-specialist",
-            description="Prices the exposure.",
-            instructions="Price the exposure against the customer's SLA band.",
-            tools=CASE_TOOLS,
+            description="Moves and prices everything that depended on the flight.",
+            instructions=(
+                "Move the hotel nights and activities that depended on the cancelled flight, check the "
+                "flight against EU261, and price what the change costs us against the customer's tier."
+            ),
+            tools=[*PLANNER_TOOLS, estimate_compensation],
         ),
         Agent(
             client=chat_client("writer-agent"),
             name="writer-agent",
             description="Writes the letter.",
-            instructions="Write the customer letter conveying the outcome.",
+            instructions=(
+                "Write the letter to the travellers conveying the new plan. Put a date on every commitment and "
+                "say who owes any compensation."
+            ),
         ),
     ]
 
@@ -71,41 +77,67 @@ async def demo(prompt: str) -> list[str]:
     notes: list[str] = []
     STORE.record("checkpoint:demo", "start", prompt[:60], pattern="checkpoint-resume")
 
-    # --- first run, abandoned deliberately after the first stage ----------
+    # --- first run, abandoned deliberately once stage one is checkpointed --
+    #
+    # Stop on the superstep boundary, not on the stage's own completion event.
+    # The checkpoint that covers a stage is written when its superstep closes,
+    # which is *after* executor_completed fires - so a run killed on
+    # executor_completed resumes from the checkpoint before the stage, and the
+    # new instance quietly runs stage one again. That is this pattern's own
+    # failure mode, replayed side effects, happening unannounced on stage.
+    # The store outlives a single demo - it is the one thing that must - so it
+    # also holds every earlier run's checkpoints, including runs that finished.
+    # Resume from "the latest checkpoint in storage" and a second demo in the
+    # same process resumes the first demo's finished run: the new instance has
+    # nothing left to do and no letter comes out. Only this run's count.
+    before = {c.checkpoint_id for c in await CHECKPOINTS.list_checkpoints(workflow_name=WORKFLOW_NAME)}
+
     first = build()
-    stages = 0
+    stage_one = _participants()[0].name
+    stage_one_done = False
     async for event in first.run(prompt, stream=True):
-        if event.type == "executor_completed":
-            stages += 1
-            if stages >= 2:
-                notes.append(f"Interrupted the run after {stages} executor(s) - simulating a pod restart.")
-                break
+        if event.type == "executor_completed" and getattr(event, "executor_id", "") == stage_one:
+            stage_one_done = True
+        elif event.type == "superstep_completed" and stage_one_done:
+            notes.append(f"Interrupted the run after stage one ({stage_one}) - simulating a pod restart.")
+            break
     del first  # the object is gone; only the checkpoint store survives
 
-    saved = await CHECKPOINTS.list_checkpoints(workflow_name=WORKFLOW_NAME)
+    saved = [
+        c for c in await CHECKPOINTS.list_checkpoints(workflow_name=WORKFLOW_NAME) if c.checkpoint_id not in before
+    ]
     if not saved:
         notes.append("No checkpoint was written - nothing to resume from.")
         return notes
 
     latest = sorted(saved, key=lambda c: (c.iteration_count, c.timestamp))[-1]
-    notes.append(f"{len(saved)} checkpoint(s) in storage. Latest: {str(latest.checkpoint_id)[:18]}.")
+    notes.append(f"{len(saved)} checkpoint(s) written by this run. Latest: {str(latest.checkpoint_id)[:18]}.")
 
     # --- a brand new Workflow object, resuming the old run ----------------
     resumed = build()
     notes.append("Built a NEW workflow instance - it shares only the checkpoint store.")
-    outputs: list[str] = []
+    ran: list[str] = []
+    by_author: dict[str, list[str]] = {}
     async for event in resumed.run(checkpoint_id=latest.checkpoint_id, stream=True):
-        if event.type == "output":
+        if event.type == "executor_invoked":
+            executor_id = getattr(event, "executor_id", "") or ""
+            if executor_id and executor_id not in ran:
+                ran.append(executor_id)
+        elif event.type == "output":
+            author = getattr(event.data, "author_name", None) or "workflow"
             text = getattr(event.data, "text", None) or str(event.data)
-            if text.strip():
-                outputs.append(text.strip())
+            by_author.setdefault(author, []).append(text)
+    notes.append(
+        f"Resumed from the checkpoint and ran to completion: the new instance ran {', '.join(ran) or 'nothing'}"
+        + (f" - {stage_one} did not run again." if stage_one not in ran else f" - and {stage_one} ran AGAIN.")
+    )
     # Streamed output arrives in chunks; join before narrating so the line reads
-    # as one answer rather than as the transport's frame size.
-    joined = " ".join(outputs)
-    notes.append("Resumed from the checkpoint and ran to completion.")
-    if joined:
-        notes.append(f"  -> {joined[:260]}")
-    STORE.record("checkpoint:demo", "resumed", f"{len(outputs)} outputs", pattern="checkpoint-resume")
+    # as one answer rather than as the transport's frame size. Show the stage
+    # the resumed instance finished with - the letter - not the replayed recap.
+    final = "".join(by_author[list(by_author)[-1]]).strip() if by_author else ""
+    if final:
+        notes.append(f"  -> {final[:320]}")
+    STORE.record("checkpoint:demo", "resumed", f"ran {', '.join(ran)}", pattern="checkpoint-resume")
     return notes
 
 
@@ -143,8 +175,35 @@ SPEC = PatternSpec(
         "workflow state - and remember a checkpoint is a copy of your data, subject to the same retention "
         "rules as everything else."
     ),
-    scenario="A three-stage claim pipeline, interrupted after stage one by a pod restart.",
-    default_prompt="Work the exception on shipment BFG-24090 and write the customer letter.",
+    scenario="BTA-26109: a school group's rebooking to Rome, interrupted after stage one by a pod restart.",
+    case=CaseBrief(
+        about=(
+            "An Italian air traffic control strike has cancelled the Mežaparks Secondary School group's flight to Rome "
+            "- 32 students and 4 teachers, rebooked two days later. The rebooking is an ordinary three-stage job: get "
+            "the facts, move and price everything that depended on the flight, write to the parents. Then, halfway "
+            "through, the pod running it dies."
+        ),
+        why=(
+            "Losing the run would mean redoing every model call already paid for - and if a human approval were "
+            "sitting in the middle of it, losing their decision too. So this demo proves the recovery the only way "
+            "that counts. It does not pause and continue the same object. It throws the first workflow instance away "
+            "entirely and builds a brand new one, which finishes the job from the checkpoint alone - and the log names "
+            "the stages it ran, so you can see intake is not one of them. In production, stage two is where 36 tickets "
+            "get reissued - which is exactly why replayed side effects are this pattern's failure mode. Storage is in "
+            "memory here; the same interface backs file and Cosmos storage."
+        ),
+        facts=(
+            CaseFact("Booking", "BTA-26109"),
+            CaseFact("Group", "Mežaparks Secondary School - 32 students, 4 teachers"),
+            CaseFact("Flight", "airBaltic BT633 Riga → Rome, cancelled - Italian ATC strike"),
+            CaseFact("Rebooked", "26 Sep - two nights at Hotel Nord Nuova Roma released"),
+            CaseFact("Colosseum tour", "Moved to 27 Sep"),
+            CaseFact("The interruption", "Killed after stage one, resumed in a different instance"),
+        ),
+    ),
+    default_prompt=(
+        "Rebook the Mežaparks school group on BTA-26109 after the Rome cancellation and write to the parents."
+    ),
     nodes=(
         DiagramNode("s1", "intake-agent", "agent"),
         DiagramNode("s2", "pricing-specialist", "agent"),
@@ -153,11 +212,10 @@ SPEC = PatternSpec(
         DiagramNode("new", "New workflow instance", "executor"),
     ),
     edges=(
-        DiagramEdge("s1", "s2", "stage 1 done"),
-        DiagramEdge("s1", "store", "checkpoint", "dashed"),
-        DiagramEdge("s2", "store", "checkpoint", "dashed"),
+        DiagramEdge("s1", "store", "checkpoint, then killed", "dashed"),
         DiagramEdge("store", "new", "resume by id", "loop"),
-        DiagramEdge("new", "s3", "continues"),
+        DiagramEdge("new", "s2", "continues at stage 2"),
+        DiagramEdge("s2", "s3", ""),
     ),
     devui_name="CheckpointResume",
     build=build,

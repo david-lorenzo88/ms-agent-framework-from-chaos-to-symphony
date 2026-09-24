@@ -60,8 +60,8 @@ class RunSession:
         """Best-effort map from a framework executor id to a diagram node.
 
         Diagram nodes are authored for the audience, so their ids are short
-        ('customs') while the framework's are full agent names
-        ('customs-specialist'). Match on label first, then on containment.
+        ('flights') while the framework's are full agent names
+        ('flights-specialist'). Match on label first, then on containment.
 
         The third rule exists because the orchestration builders name their
         coordinator after the *pattern*, not after the agent you handed them:

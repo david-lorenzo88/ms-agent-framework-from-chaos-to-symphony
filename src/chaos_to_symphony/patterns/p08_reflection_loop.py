@@ -1,8 +1,8 @@
 """Pattern 8 - Reflection loop.
 
-New material this year. A drafter writes the customer letter, a reviewer judges
-it against policy, and a rejected draft goes back round with the feedback
-attached. The graph contains a genuine cycle.
+New material this year. A writer drafts the customer letter, a reviewer judges
+it against the letter policy, and a rejected draft goes back round with the
+objection attached. The graph contains a genuine cycle.
 
 The point on stage: a cycle is the first thing in this whole tour that can run
 forever. The loop counter is not a nicety - it is the only reason this
@@ -27,9 +27,10 @@ from agent_framework import (
 )
 from pydantic import BaseModel
 
-from ..base import DiagramEdge, DiagramNode, PatternSpec, PromptExample, parse_structured
+from ..base import CaseBrief, CaseFact, DiagramEdge, DiagramNode, PatternSpec, PromptExample, parse_structured
 from ..clients import chat_client
 from ..memory import STORE
+from ..tools import LETTER_TOOLS
 
 MAX_REVISIONS = 3
 BRIEF_KEY = "brief"
@@ -131,25 +132,36 @@ def build():
     """start -> drafter -> capture -> reviewer -> judge -> (loop back to drafter | out)."""
     drafter = AgentExecutor(
         Agent(
-            client=chat_client("writer-agent"),
-            name="writer-agent",
+            client=chat_client("letter-writer"),
+            name="letter-writer",
             description="Writes and rewrites the customer letter.",
             instructions=(
-                "Write the customer letter. Acknowledge the problem, state the cause, commit to a dated "
-                "remedy. Never admit legal liability. If given an objection, address it directly."
+                "Write the customer letter. Look the booking up first, and check any disrupted flight against "
+                "EU261. State what happened and what the traveller is owed, and by whom, with a date on every "
+                "commitment. Never promise compensation the airline does not owe, and never admit liability. "
+                "If given an objection, address it directly."
             ),
+            # The writer speaks first: nobody before it has put the facts in
+            # the conversation, so without its own lookup a live model drafts
+            # a letter about a trip it has never seen. The offline client never
+            # showed this - it reads the store itself.
+            tools=LETTER_TOOLS,
         ),
-        id="writer-agent",
+        id="letter-writer",
     )
     reviewer = AgentExecutor(
         Agent(
             client=chat_client("review-agent"),
             name="review-agent",
-            description="Judges a draft against tone and policy rules.",
+            description="Judges a draft against the letter policy.",
             instructions=(
-                "Judge the letter against policy. Return JSON with 'decision' ('approve' or 'revise') and "
-                "'reason'. Reject anything that admits liability or gives an undated promise."
+                "Judge the letter against the letter policy. Return JSON with 'decision' ('approve' or "
+                "'revise') and 'reason'. Revise it if it: (1) promises EU261 compensation the airline does not "
+                "owe - check the booking with check_eu261; (2) leaves out the traveller's rights on a cancelled "
+                "flight - rerouting or a full refund, and meals while they wait where those are owed; (3) makes "
+                "any promise without a date; or (4) admits liability."
             ),
+            tools=LETTER_TOOLS,
             default_options=ChatOptions(response_format=Verdict),
         ),
         id="review-agent",
@@ -198,13 +210,44 @@ SPEC = PatternSpec(
         "conversation. Cap the iterations, make the exit path escalate rather than silently accept, and log "
         "the approve/revise ratio: a critic approving 100% of first drafts has stopped reviewing."
     ),
-    scenario="BFG-24095: a dairy temperature excursion. The letter must not admit liability.",
+    scenario=(
+        "BTA-26111: a flight cancelled by an air traffic control strike. The letter must not promise money the airline "
+        "does not owe."
+    ),
+    case=CaseBrief(
+        about=(
+            "Laura Vītola spent six hours at Riga airport before airBaltic cancelled her flight to Paris: French air "
+            "traffic control was on strike. She is owed something, but not what most people think. An air traffic "
+            "control strike is an extraordinary circumstance, so the EUR 400 of EU261 compensation she will have read "
+            "about is not owed - by anyone. What she is owed is the choice of another flight or a refund, and meals "
+            "for the hours she waited. The letter has to say exactly that."
+        ),
+        why=(
+            "Quality here is testable, which is the precondition for the pattern working at all. The reviewer applies "
+            "four rules: no promise of compensation that is not owed, the traveller's rights on a cancelled flight "
+            "stated, a date on every commitment, and no admission of liability. So the graph has a cycle: the writer "
+            "drafts, the reviewer judges, and a rejection goes straight back to the writer with the objection "
+            "attached. On this case the first draft promises the EUR 400, the second takes it out and forgets her "
+            "rights, and the third passes. Both agents look the booking up and check EU261 themselves - the writer "
+            "speaks first, so nobody before it has put the facts in the conversation. The interesting part is not the "
+            "loop but the exit: try the third example, whose refund waits on a hotel that has not answered, so no "
+            "draft can ever date it."
+        ),
+        facts=(
+            CaseFact("Booking", "BTA-26111"),
+            CaseFact("Flight", "airBaltic BT691 Riga → Paris, cancelled on the day"),
+            CaseFact("Cause", "French air traffic control strike - an extraordinary circumstance"),
+            CaseFact("EU261 compensation", "None - the 1,672 km band is EUR 400, but not for a strike"),
+            CaseFact("Still owed", "Rerouting or a refund, and meals for the wait"),
+            CaseFact("Customer", "Laura Vītola, silver tier"),
+        ),
+    ),
     default_prompt=(
-        "Draft the customer letter for BFG-24095, a temperature excursion on chilled dairy to Copenhagen."
+        "Draft the customer letter for BTA-26111, a flight to Paris cancelled by an air traffic control strike."
     ),
     nodes=(
         DiagramNode("start", "start", "executor"),
-        DiagramNode("writer", "writer-agent", "agent"),
+        DiagramNode("writer", "letter-writer", "agent"),
         DiagramNode("cap", "capture_draft", "executor"),
         DiagramNode("rev", "review-agent", "agent"),
         DiagramNode("judge", "judge", "gate"),
@@ -220,19 +263,25 @@ SPEC = PatternSpec(
     ),
     prompt_examples=(
         PromptExample(
-            ending="APPROVED at revision 1",
-            prompt="Draft the customer letter for BFG-24082 and review it until it passes policy.",
-            why="The reviewer signs off the first draft. The loop is capable of not looping.",
+            ending="APPROVED at revision 3",
+            prompt="Draft the customer letter for BTA-26111 and review it until it passes policy.",
+            why=(
+                "The first draft promises the EUR 400 the strike cancels; the second forgets her rights; the third "
+                "passes."
+            ),
         ),
         PromptExample(
-            ending="APPROVED at revision 3",
-            prompt="Draft the customer letter for BFG-24087 and review it until it passes policy.",
-            why="Two rounds of revision, then approval - the loop doing the work it exists for.",
+            ending="APPROVED at revision 1",
+            prompt="Draft the customer letter for BTA-26107 and review it until it passes policy.",
+            why="A cancelled kayak trip with a refund date already confirmed. The loop is capable of not looping.",
         ),
         PromptExample(
             ending="ESCALATED after 3 revisions",
-            prompt="Draft the customer letter for BFG-24081 and review it until it passes policy.",
-            why="The reviewer never approves, so MAX_REVISIONS ends it and a human picks it up.",
+            prompt="Draft the customer letter for BTA-26106 and review it until it passes policy.",
+            why=(
+                "The refund waits on a hotel that has not answered, so no draft can put a date on it. MAX_REVISIONS "
+                "ends it and a person takes over."
+            ),
         ),
     ),
     devui_name="ReflectionLoop",

@@ -53,7 +53,7 @@ def _describe(span: Any) -> dict[str, Any]:
     name = span.name or ""
     subject = attributes.get("executor.id") or ""
     if not subject and " " in name:
-        # "invoke_agent intake-agent" / "execute_tool lookup_shipment"
+        # "invoke_agent intake-agent" / "execute_tool lookup_booking"
         subject = name.split(" ", 1)[1]
     return {
         "name": name,

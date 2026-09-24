@@ -32,6 +32,7 @@ const state = {
   traces: [],        // OpenTelemetry spans from the last run
   nodes: new Map(),  // diagram node id -> <g>
   approvalTimer: null,
+  domain: null,     // the briefing, fetched once and kept
 };
 
 /* ── boot ─────────────────────────────────────────────────────── */
@@ -50,6 +51,7 @@ async function boot() {
   wireControls();
   wireSettings();
   wireStage();
+  wireDomain();
 
   // Deep-link support, so a slide can point straight at one pattern.
   const wanted = new URLSearchParams(location.search).get('pattern');
@@ -57,6 +59,7 @@ async function boot() {
 
   refreshDevui();
   loadStore();
+  loadDomain();
 }
 
 /* ── rail ─────────────────────────────────────────────────────── */
@@ -97,6 +100,7 @@ function select(pattern) {
   $('pSummary').textContent = pattern.summary;
   $('pFail').textContent = pattern.failureMode;
   $('pScenario').textContent = pattern.scenario;
+  fillCase(pattern.case);
   $('prompt').value = pattern.defaultPrompt;
 
   const tier = $('pTier');
@@ -134,6 +138,29 @@ function select(pattern) {
 function fillList(host, items) {
   host.innerHTML = '';
   for (const item of items) host.appendChild(el('li', null, item));
+}
+
+/**
+ * The business case, for an audience that has never seen a travel desk.
+ *
+ * Every pattern carries one, so the card is never empty - but guard anyway,
+ * because an older API response without `case` should degrade to a hidden card
+ * rather than a page of `undefined`.
+ */
+function fillCase(brief) {
+  const card = document.querySelector('.card-case');
+  if (!brief) { card.hidden = true; return; }
+  card.hidden = false;
+
+  $('caseAbout').textContent = brief.about;
+  $('caseWhy').textContent = brief.why;
+
+  const facts = $('caseFacts');
+  facts.innerHTML = '';
+  for (const fact of brief.facts || []) {
+    facts.appendChild(el('dt', null, fact.label));
+    facts.appendChild(el('dd', null, fact.value));
+  }
 }
 
 /**
@@ -479,10 +506,10 @@ function handleFrame(frame) {
  * prompt and they are answering a question nobody asked any more - and a green
  * branch is read as this prompt's answer, not the previous one's. Loading an
  * example made that easy to hit: one click swaps the prompt and leaves the
- * previous run lit, so picking "MAJOR INCIDENT DESK" after running the
+ * previous run lit, so picking "DUTY DESK" after running the
  * standard-queue case shows standard_queue in green above it.
  *
- * The log is left alone. It names its own shipment in every line, it is the
+ * The log is left alone. It names its own booking in every line, it is the
  * record of what happened, and wiping it on a keystroke would throw away
  * something worth reading. The next run clears it anyway.
  */
@@ -598,8 +625,8 @@ function showApproval(frame) {
   const facts = $('approvalFacts');
   facts.innerHTML = '';
   const labels = {
-    shipment: 'Shipment', customer: 'Customer', tier: 'Tier',
-    declaredValueEur: 'Declared value', approvalThresholdEur: 'Approval threshold',
+    booking: 'Booking', customer: 'Customer', tier: 'Tier',
+    packagePriceEur: 'Package price', approvalThresholdEur: 'Approval threshold',
     goodwillCeilingEur: 'Goodwill ceiling',
   };
   for (const [key, label] of Object.entries(labels)) {
@@ -744,16 +771,16 @@ function renderAudit(rows) {
 async function loadStore() {
   const data = await (await fetch('/api/store')).json();
   $('storeNote').textContent =
-    `${data.shipments} shipments, ${data.customers} customers, ${data.tariffLines} tariff lines, ` +
-    `${data.openExceptions} open exceptions — all held in process memory. No database.`;
+    `${data.bookings} bookings, ${data.customers} customers, ${data.invoices} supplier invoices, ` +
+    `${data.openIncidents} open incidents — all held in process memory. No database.`;
   const body = $('storeTable').querySelector('tbody');
   body.innerHTML = '';
   for (const row of data.rows) {
     const tr = el('tr');
     tr.appendChild(el('td', null, row.id));
-    tr.appendChild(el('td', null, row.lane));
-    tr.appendChild(el('td', null, row.goods));
-    tr.appendChild(el('td', null, row.exception));
+    tr.appendChild(el('td', null, row.trip));
+    tr.appendChild(el('td', null, row.route));
+    tr.appendChild(el('td', null, row.incident));
     tr.appendChild(el('td', null, row.severity));
     const value = el('td', 'right', 'EUR ' + row.valueEur.toLocaleString('en-GB'));
     tr.appendChild(value);
@@ -1047,6 +1074,93 @@ function agentCard(agent) {
   card.appendChild(tools);
 
   return card;
+}
+
+/* ── the domain briefing ──────────────────────────────────────────
+   Twelve patterns against one story. An attendee who does not know what a
+   travel incident is cannot follow any of the twelve, so the briefing is one
+   click away from the topbar and from every pattern's own case card.
+
+   It deliberately does NOT open itself. A modal over the page on first load
+   swallows the first click on it, which breaks scripts/drive.py - and would do
+   the same to a speaker presenting from a fresh browser profile, on stage, in
+   front of the people this briefing is for. Instead the button glows until it
+   has been opened once, which says "start here" without taking the page away.
+   ──────────────────────────────────────────────────────────────── */
+
+const DOMAIN_SEEN = 'chaos:domain-seen';
+
+function wireDomain() {
+  $('domainBtn').addEventListener('click', () => openDomain());
+  $('caseDomainLink').addEventListener('click', () => openDomain());
+  $('domainClose').addEventListener('click', closeDomain);
+  $('domainModal').addEventListener('click', (event) => {
+    if (event.target === $('domainModal')) closeDomain();
+  });
+  document.addEventListener('keydown', (event) => {
+    if (event.key === 'Escape' && !$('domainModal').hidden) closeDomain();
+  });
+}
+
+async function loadDomain() {
+  try {
+    state.domain = await (await fetch('/api/domain')).json();
+  } catch {
+    return;                       // the button just stays quiet
+  }
+  paintDomain(state.domain);
+  if (!domainSeen()) $('domainBtn').classList.add('is-fresh');
+}
+
+/** Storage can throw in a locked-down browser; a highlight is not worth a broken page. */
+function domainSeen() {
+  try { return localStorage.getItem(DOMAIN_SEEN) === '1'; } catch { return true; }
+}
+
+function openDomain() {
+  if (!state.domain) return;
+  $('domainModal').hidden = false;
+  $('domainClose').focus();
+  $('domainBtn').classList.remove('is-fresh');
+  try { localStorage.setItem(DOMAIN_SEEN, '1'); } catch { /* private mode */ }
+}
+
+function closeDomain() {
+  $('domainModal').hidden = true;
+}
+
+function paintDomain(brief) {
+  $('domainTitle').textContent = brief.name;
+  $('domainTagline').textContent = brief.tagline;
+  $('domainFoot').textContent = brief.footnote;
+
+  const story = $('domainStory');
+  story.innerHTML = '';
+  for (const para of brief.story) story.appendChild(el('p', null, para));
+
+  const facts = $('domainFacts');
+  facts.innerHTML = '';
+  for (const fact of brief.facts) {
+    const tile = el('div', 'domain-fact');
+    tile.appendChild(el('span', 'domain-fact-value', fact.value));
+    tile.appendChild(el('span', 'domain-fact-label', fact.label));
+    facts.appendChild(tile);
+  }
+
+  const groups = $('domainGroups');
+  groups.innerHTML = '';
+  for (const group of brief.groups) {
+    const box = el('section', 'domain-group');
+    box.appendChild(el('h4', null, group.title));
+    if (group.blurb) box.appendChild(el('p', 'domain-group-blurb', group.blurb));
+    const list = el('dl', 'domain-terms');
+    for (const term of group.terms) {
+      list.appendChild(el('dt', null, term.term));
+      list.appendChild(el('dd', null, term.meaning));
+    }
+    box.appendChild(list);
+    groups.appendChild(box);
+  }
 }
 
 boot();

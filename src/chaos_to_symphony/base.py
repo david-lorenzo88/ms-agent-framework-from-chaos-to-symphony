@@ -91,6 +91,38 @@ class PromptExample:
 
 
 @dataclass(frozen=True, slots=True)
+class CaseFact:
+    """One hard number from the store, shown beside the case."""
+
+    label: str
+    value: str
+
+
+@dataclass(frozen=True, slots=True)
+class CaseBrief:
+    """What the demo's business case is, for an audience that does not know it.
+
+    ``scenario`` is the one-line headline. This is the paragraph underneath it,
+    and it answers the two questions an attendee actually has: what is going on
+    at this travel agency, and why is *this* case the one chosen to show
+    *this* pattern. The second question matters more than it looks - the cases
+    were picked so the pattern's argument is visible in the run, and if that
+    reasoning only lives in the speaker's head then the twelve demos look
+    interchangeable.
+
+    ``facts`` are pulled from real rows in the store, so ``scripts/smoke.py``
+    can check that every booking and invoice named here still exists in the
+    store the text describes.
+    """
+
+    about: str
+    """What is happening in the business, in the audience's language."""
+    why: str
+    """Why this case demonstrates this pattern rather than any other."""
+    facts: tuple[CaseFact, ...] = ()
+
+
+@dataclass(frozen=True, slots=True)
 class PatternSpec:
     """Everything the session needs to know about one orchestration pattern."""
 
@@ -106,7 +138,7 @@ class PatternSpec:
     failure_mode: str
     """The way this pattern breaks in production, and the knob that stops it."""
     scenario: str
-    """The Baltic Freight case this demo runs."""
+    """The Baltic Travel Agency case this demo runs."""
     default_prompt: str
     nodes: tuple[DiagramNode, ...]
     edges: tuple[DiagramEdge, ...]
@@ -118,6 +150,8 @@ class PatternSpec:
     more than once - stop it, inspect it, restart it - so they supply an async
     callable returning narration lines instead of relying on the generic runner.
     """
+    case: CaseBrief | None = None
+    """The same case as ``scenario``, explained. Shown on the pattern's screen."""
     prompt_examples: tuple[PromptExample, ...] = ()
     """Prompts that each drive a different ending. Empty for patterns with one."""
     devui_name: str = ""
@@ -144,6 +178,15 @@ class PatternSpec:
             "mafApi": list(self.maf_api),
             "failureMode": self.failure_mode,
             "scenario": self.scenario,
+            "case": (
+                {
+                    "about": self.case.about,
+                    "why": self.case.why,
+                    "facts": [{"label": f.label, "value": f.value} for f in self.case.facts],
+                }
+                if self.case
+                else None
+            ),
             "defaultPrompt": self.default_prompt,
             "promptExamples": [
                 {"ending": e.ending, "prompt": e.prompt, "why": e.why} for e in self.prompt_examples

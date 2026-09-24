@@ -30,7 +30,7 @@ from agent_framework import (
 from pydantic import BaseModel
 from typing_extensions import Never
 
-from ..base import DiagramEdge, DiagramNode, PatternSpec, PromptExample, parse_structured
+from ..base import CaseBrief, CaseFact, DiagramEdge, DiagramNode, PatternSpec, PromptExample, parse_structured
 from ..clients import chat_client
 from ..memory import STORE
 from ..tools import TRIAGE_TOOLS
@@ -42,7 +42,7 @@ class Triage(BaseModel):
     """What the classifier must return. Structured output, not prose."""
 
     severity: Literal["critical", "high", "medium", "low"]
-    exception_kind: Literal["damage", "customs_hold", "delay", "lost", "temperature_excursion"]
+    incident_kind: Literal["flight_cancelled", "flight_delayed", "overbooked", "not_as_booked", "activity_cancelled"]
     reason: str
 
 
@@ -51,7 +51,7 @@ class Routed:
     """The typed payload the switch group evaluates."""
 
     severity: str
-    exception_kind: str
+    incident_kind: str
     reason: str
 
 
@@ -75,15 +75,15 @@ async def intake(case_text: str, ctx: WorkflowContext[AgentExecutorRequest]) -> 
 async def to_routed(response: AgentExecutorResponse, ctx: WorkflowContext[Routed]) -> None:
     """Validate the classifier's JSON, then emit the typed payload the switch reads."""
     parsed = parse_structured(Triage, response.agent_response.text)
-    await ctx.send_message(Routed(parsed.severity, parsed.exception_kind, parsed.reason))
+    await ctx.send_message(Routed(parsed.severity, parsed.incident_kind, parsed.reason))
 
 
-@executor(id="major_incident")
-async def major_incident(routed: Routed, ctx: WorkflowContext[Never, str]) -> None:
-    """Critical and high go to the major-incident desk, and page a duty manager."""
-    STORE.record("switch:major_incident", "route", routed.exception_kind, pattern="switch-case")
+@executor(id="duty_desk")
+async def duty_desk(routed: Routed, ctx: WorkflowContext[Never, str]) -> None:
+    """Critical and high go to the duty desk, and page the duty manager."""
+    STORE.record("switch:duty_desk", "route", routed.incident_kind, pattern="switch-case")
     await ctx.yield_output(
-        f"MAJOR INCIDENT DESK - severity {routed.severity}, kind {routed.exception_kind}. "
+        f"DUTY DESK - severity {routed.severity}, kind {routed.incident_kind}. "
         f"Duty manager paged. Rationale: {routed.reason}"
     )
 
@@ -91,9 +91,9 @@ async def major_incident(routed: Routed, ctx: WorkflowContext[Never, str]) -> No
 @executor(id="standard_queue")
 async def standard_queue(routed: Routed, ctx: WorkflowContext[Never, str]) -> None:
     """Medium severity joins the standard resolution queue."""
-    STORE.record("switch:standard_queue", "route", routed.exception_kind, pattern="switch-case")
+    STORE.record("switch:standard_queue", "route", routed.incident_kind, pattern="switch-case")
     await ctx.yield_output(
-        f"STANDARD QUEUE - severity {routed.severity}, kind {routed.exception_kind}. "
+        f"STANDARD QUEUE - severity {routed.severity}, kind {routed.incident_kind}. "
         f"Target resolution 48h. Rationale: {routed.reason}"
     )
 
@@ -101,9 +101,9 @@ async def standard_queue(routed: Routed, ctx: WorkflowContext[Never, str]) -> No
 @executor(id="watchlist")
 async def watchlist(routed: Routed, ctx: WorkflowContext[Never, str]) -> None:
     """The Default branch. Anything unmatched lands here rather than vanishing."""
-    STORE.record("switch:watchlist", "route", routed.exception_kind, pattern="switch-case")
+    STORE.record("switch:watchlist", "route", routed.incident_kind, pattern="switch-case")
     await ctx.yield_output(
-        f"WATCHLIST (default branch) - severity {routed.severity}, kind {routed.exception_kind}. "
+        f"WATCHLIST (default branch) - severity {routed.severity}, kind {routed.incident_kind}. "
         f"No action, monitored daily. Rationale: {routed.reason}"
     )
 
@@ -114,19 +114,19 @@ def build():
         Agent(
             client=chat_client("triage-classifier"),
             name="triage-classifier",
-            description="Grades a freight exception into a severity and a kind.",
+            description="Grades a travel incident into a severity and a kind.",
             instructions=(
-                "Grade the freight exception. If the request names a shipment reference, look it up "
-                "first: the record carries the exception kind and the severity on file, and a grade "
-                "invented without them is a guess. Then return JSON with 'severity' (critical, high, "
-                "medium or low), 'exception_kind' and a one-sentence 'reason'. Return nothing but JSON."
+                "Grade the travel incident. If the request names a booking reference, look it up first: "
+                "the record carries the incident kind and the severity on file, and a grade invented "
+                "without them is a guess. Then return JSON with 'severity' (critical, high, medium or "
+                "low), 'incident_kind' and a one-sentence 'reason'. Return nothing but JSON."
             ),
             # Read-only access to the case file. Without it a real model asked to
-            # "triage exception BFG-24084" knows nothing except that the string
+            # "triage incident BTA-26109" knows nothing except that the string
             # looks like a reference, and grades every case the same safe middle
             # way - which lands every run on the medium branch and makes the
             # routing look broken. The offline client never showed this: it reads
-            # the shipment out of the in-memory store itself, so it has facts the
+            # the booking out of the in-memory store itself, so it has facts the
             # model it stands in for was never given.
             tools=TRIAGE_TOOLS,
             default_options=ChatOptions(response_format=Triage),
@@ -141,7 +141,7 @@ def build():
         .add_switch_case_edge_group(
             to_routed,
             [
-                Case(condition=severity_is("critical", "high"), target=major_incident),
+                Case(condition=severity_is("critical", "high"), target=duty_desk),
                 Case(condition=severity_is("medium"), target=standard_queue),
                 Default(target=watchlist),
             ],
@@ -179,45 +179,79 @@ SPEC = PatternSpec(
         "@executor(id=...) / WorkflowContext[T]",
     ),
     failure_mode=(
-        "The silent default. Add a sixth exception kind upstream and it quietly falls through to Default "
+        "The silent default. Add a sixth incident kind upstream and it quietly falls through to Default "
         "forever - no error, no alert, just a branch nobody reads. Make the default branch noisy: log it, "
         "count it, and alert when its share moves."
     ),
-    scenario="A new exception arrives with no triage grade. Route it to the right desk in one hop.",
+    scenario="An incident arrives with no triage grade. Route it to the right desk in one hop.",
+    case=CaseBrief(
+        about=(
+            "Return flight BT716 from Tenerife has been cancelled for a technical fault, and the next seats are two "
+            "days away. A family of four is at the airport with nowhere to sleep tonight. The incident has been "
+            "logged, but nobody has graded it yet - and until it is graded it sits in no queue at all. It has to land "
+            "in exactly one of three places - the duty desk, the standard queue, or the watchlist - in one hop, now."
+        ),
+        why=(
+            "This is the division of labour that makes graph routing trustworthy: the model classifies, the graph "
+            "decides. A single agent looks the booking up and produces a typed, validated grade - severity and kind, "
+            "nothing more. Ordinary Python predicates then test that payload in order and deliver it to the first "
+            "match, or to Default: critical and high to the duty desk, medium to the standard queue, anything else to "
+            "the watchlist. The routing decision is unit-testable and cannot drift, because no model is anywhere near "
+            "the control flow. Try all three example prompts: each carries a different severity and each lands "
+            "somewhere different."
+        ),
+        facts=(
+            CaseFact("Booking", "BTA-26110"),
+            CaseFact("Flight", "airBaltic BT716 Tenerife → Riga, cancelled - a technical fault"),
+            CaseFact("Travellers", "Liepiņš family, 4, silver tier"),
+            CaseFact("Next seats", "25 Sep - two nights stranded"),
+            CaseFact("Arrives as", "An incident with no triage grade"),
+            CaseFact("Desks", "Duty desk, standard queue, watchlist (Default)"),
+        ),
+    ),
     default_prompt=(
-        "Shipment BFG-24099 - forklift strike at the Klaipeda hub, 3 of 12 pallets of rack PDUs compromised. "
-        "Grade and route this exception."
+        "Booking BTA-26110 - return flight from Tenerife cancelled, family of four with no hotel tonight. Grade and "
+        "route this incident."
     ),
     nodes=(
         DiagramNode("intake", "intake", "executor"),
         DiagramNode("clf", "triage-classifier", "agent"),
         DiagramNode("routed", "to_routed", "executor"),
-        DiagramNode("major", "major_incident", "gate"),
+        DiagramNode("duty", "duty_desk", "gate"),
         DiagramNode("std", "standard_queue", "gate"),
         DiagramNode("watch", "watchlist (Default)", "gate"),
     ),
     edges=(
         DiagramEdge("intake", "clf", "case"),
         DiagramEdge("clf", "routed", "JSON"),
-        DiagramEdge("routed", "major", "critical | high"),
+        DiagramEdge("routed", "duty", "critical | high"),
         DiagramEdge("routed", "std", "medium"),
         DiagramEdge("routed", "watch", "Default", "dashed"),
     ),
     prompt_examples=(
         PromptExample(
-            ending="MAJOR INCIDENT DESK",
-            prompt="Triage exception BFG-24084 and route it to the right desk.",
-            why="Graded critical, so it matches the first Case and a duty manager is paged.",
+            ending="DUTY DESK",
+            prompt="Triage incident BTA-26109 and route it to the right desk.",
+            why=(
+                "A school group of 36 with no flight to Rome: graded critical, so it matches the first Case and the "
+                "duty manager is paged."
+            ),
         ),
         PromptExample(
             ending="STANDARD QUEUE",
-            prompt="Triage exception BFG-24085 and route it to the right desk.",
-            why="Graded medium: past the first Case, matched by the second.",
+            prompt="Triage incident BTA-26107 and route it to the right desk.",
+            why=(
+                "A kayak trip cancelled for high water, refund already confirmed: graded medium - past the first Case, "
+                "matched by the second."
+            ),
         ),
         PromptExample(
             ending="WATCHLIST (default branch)",
-            prompt="Triage exception BFG-24094 and route it to the right desk.",
-            why="Graded low, so no Case matches and Default catches it rather than it vanishing.",
+            prompt="Triage incident BTA-26108 and route it to the right desk.",
+            why=(
+                "A 40-minute delay the traveller shrugged off: graded low, so no Case matches and Default catches it "
+                "rather than it vanishing."
+            ),
         ),
     ),
     devui_name="SwitchCase",

@@ -1,8 +1,8 @@
 """Pattern 9 - Sub-workflow composition.
 
-New material this year. The compliance gate - sanctions screening plus tariff
-classification - is built once as its own workflow and then *embedded* in the
-claim-handling workflow through a ``WorkflowExecutor``.
+New material this year. The payment-risk gate - a fraud flag and an open
+chargeback, checked before any money moves - is built once as its own workflow
+and then *embedded* in the refund workflow through a ``WorkflowExecutor``.
 
 The point on stage: workflows compose. The gate has its own tests, its own
 owner and its own release cadence, and the parent treats it as one node. This
@@ -27,19 +27,19 @@ from agent_framework import (
 )
 from typing_extensions import Never
 
-from ..base import DiagramEdge, DiagramNode, PatternSpec, PromptExample
+from ..base import CaseBrief, CaseFact, DiagramEdge, DiagramNode, PatternSpec, PromptExample
 from ..clients import chat_client
-from ..memory import STORE
-from ..tools import CUSTOMS_TOOLS
+from ..memory import BOOKING_REF, STORE
+from ..tools import estimate_compensation, lookup_booking, screening
 
-SHIPMENT_KEY = "shipment_id"
+BOOKING_KEY = "booking_id"
 
 
 @dataclass
 class GateVerdict:
-    """What the compliance gate returns to whoever embedded it."""
+    """What the payment-risk gate returns to whoever embedded it."""
 
-    shipment_id: str
+    booking_id: str
     cleared: bool
     detail: str
 
@@ -50,35 +50,28 @@ class GateVerdict:
 
 
 @executor(id="gate_screen")
-async def gate_screen(shipment_id: str, ctx: WorkflowContext[Never, GateVerdict]) -> None:
-    """Screen the consignee and check the licence requirement. Pure Python, no model.
+async def gate_screen(booking_id: str, ctx: WorkflowContext[Never, GateVerdict]) -> None:
+    """Screen the payment for a fraud flag and an open chargeback. Pure Python, no model.
 
-    A compliance gate is exactly the kind of decision that should never be a
+    A payment gate is exactly the kind of decision that should never be a
     model call: the rule is written down, the answer must be reproducible, and
-    a regulator may ask you to demonstrate it.
+    a card scheme may ask you to demonstrate it.
     """
-    shipment = STORE.shipments.get(shipment_id.strip().upper())
-    if shipment is None:
-        await ctx.yield_output(GateVerdict(shipment_id, False, "Unknown shipment reference."))
+    booking = STORE.bookings.get(booking_id.strip().upper())
+    if booking is None:
+        await ctx.yield_output(GateVerdict(booking_id, False, "Unknown booking reference."))
         return
 
-    customer = STORE.customers.get(shipment.customer_id)
-    tariff = STORE.tariff_for(shipment.hs_code)
-    problems: list[str] = []
-    if customer and not customer.sanctions_cleared:
-        problems.append(f"consignee {customer.name} fails sanctions screening")
-    if tariff and tariff.requires_licence:
-        problems.append(f"HS {shipment.hs_code} requires an import licence")
-
-    cleared = not problems
-    detail = "All compliance checks passed." if cleared else "Blocked: " + "; ".join(problems) + "."
-    STORE.record("sub-workflow:gate", "screen", f"{shipment.id} cleared={cleared}", pattern="sub-workflow")
-    await ctx.yield_output(GateVerdict(shipment.id, cleared, detail))
+    verdict = screening(booking)
+    cleared = verdict["cleared"]
+    detail = "Payment cleared: no fraud flag, no open chargeback." if cleared else "Blocked: " + verdict["reason"]
+    STORE.record("sub-workflow:gate", "screen", f"{booking.id} cleared={cleared}", pattern="sub-workflow")
+    await ctx.yield_output(GateVerdict(booking.id, cleared, detail))
 
 
-def compliance_gate():
+def payment_risk_gate():
     """The gate as a standalone workflow. Runnable, testable and shippable on its own."""
-    return WorkflowBuilder(start_executor=gate_screen, name="ComplianceGate").build()
+    return WorkflowBuilder(start_executor=gate_screen, name="PaymentRiskGate").build()
 
 
 # --------------------------------------------------------------------------
@@ -88,9 +81,10 @@ def compliance_gate():
 
 @executor(id="extract_reference")
 async def extract_reference(request: str, ctx: WorkflowContext[str]) -> None:
-    """Find the shipment reference in the request and hand it to the gate."""
-    reference = next((sid for sid in STORE.shipments if sid in request), "")
-    ctx.set_state(SHIPMENT_KEY, reference)
+    """Find the booking reference in the request and hand it to the gate."""
+    match = BOOKING_REF.search(request)
+    reference = match.group(0) if match else ""
+    ctx.set_state(BOOKING_KEY, reference)
     await ctx.send_message(reference or "UNKNOWN")
 
 
@@ -98,14 +92,14 @@ async def extract_reference(request: str, ctx: WorkflowContext[str]) -> None:
 async def on_gate_verdict(verdict: GateVerdict, ctx: WorkflowContext[AgentExecutorRequest, str]) -> None:
     """Branch on the embedded gate's answer.
 
-    A blocked consignment terminates here without ever reaching the claims
-    agent. That ordering is the whole value of a gate: the expensive, chatty
-    part of the system never sees a case it is not allowed to act on.
+    A blocked payment terminates here without ever reaching the billing agent.
+    That ordering is the whole value of a gate: the expensive, chatty part of
+    the system never sees a case it is not allowed to act on.
     """
     if not verdict.cleared:
         await ctx.yield_output(
-            f"HELD BY COMPLIANCE GATE - {verdict.shipment_id}. {verdict.detail} "
-            "No claim assessment performed; legal review required first."
+            f"HELD BY PAYMENT RISK GATE - {verdict.booking_id}. {verdict.detail} "
+            "No refund assessment performed; risk review required first."
         )
         return
     await ctx.send_message(
@@ -114,8 +108,8 @@ async def on_gate_verdict(verdict: GateVerdict, ctx: WorkflowContext[AgentExecut
                 Message(
                     "user",
                     contents=[
-                        f"Compliance cleared {verdict.shipment_id}. {verdict.detail} "
-                        "Assess the claim and propose a settlement."
+                        f"Payment cleared for {verdict.booking_id}. {verdict.detail} "
+                        "Assess the refund and propose the amount."
                     ],
                 )
             ],
@@ -131,25 +125,28 @@ async def finalise(response: AgentExecutorResponse, ctx: WorkflowContext[Never, 
 
 
 def build():
-    """extract -> [compliance gate sub-workflow] -> branch -> claims agent."""
-    gate = WorkflowExecutor(compliance_gate(), id="compliance-gate")
-    claims = AgentExecutor(
+    """extract -> [payment-risk gate sub-workflow] -> branch -> billing agent."""
+    gate = WorkflowExecutor(payment_risk_gate(), id="payment-risk-gate")
+    billing = AgentExecutor(
         Agent(
-            client=chat_client("claims-specialist"),
-            name="claims-specialist",
-            description="Assesses a cleared claim and proposes a settlement.",
-            instructions="Assess the claim and propose a settlement figure with a one-line justification.",
-            tools=CUSTOMS_TOOLS,
+            client=chat_client("billing-specialist"),
+            name="billing-specialist",
+            description="Assesses a cleared refund and proposes the amount.",
+            instructions=(
+                "Assess the refund for this booking and propose the amount in EUR, with the date it reaches "
+                "the card and a one-line justification."
+            ),
+            tools=[lookup_booking, estimate_compensation],
         ),
-        id="claims-specialist",
+        id="billing-specialist",
     )
 
     return (
         WorkflowBuilder(start_executor=extract_reference, name="SubWorkflow")
         .add_edge(extract_reference, gate)
         .add_edge(gate, on_gate_verdict)
-        .add_edge(on_gate_verdict, claims)
-        .add_edge(claims, finalise)
+        .add_edge(on_gate_verdict, billing)
+        .add_edge(billing, finalise)
         .build()
     )
 
@@ -187,39 +184,66 @@ SPEC = PatternSpec(
         "a typed result (this demo returns GateVerdict, never an exception), give the child its own "
         "instrumentation, and never let a child's silent success mean 'nothing happened'."
     ),
-    scenario="BFG-24086 again - but this time compliance blocks it before any claims work happens.",
-    default_prompt="Assess the claim on shipment BFG-24086 and propose a settlement.",
+    scenario="BTA-26104 again - but this time a payment-risk gate stops it before any refund work begins.",
+    case=CaseBrief(
+        about=(
+            "The stolen-card refund from the handoff demo - but this time it never reaches a billing specialist at "
+            "all. A payment-risk gate screens the booking first, finds the card reported stolen, and blocks the case "
+            "before anybody starts working out a refund."
+        ),
+        why=(
+            "Re-running a case you have already watched is the point. In the handoff pattern the audience saw the "
+            "stolen card caught by a triage agent reading the case. Here the same fact stops it at the door, in a "
+            "single node, before a single token is spent on the refund. That gate is a complete workflow of its own - "
+            "own graph, own state, own tests - wrapped in a WorkflowExecutor so the parent sees nothing but a booking "
+            "reference going in and a typed verdict coming out. It checks two things, a fraud flag and a chargeback "
+            "already open, and the example prompts show both. Build it once, embed it in refunds, rebookings and new "
+            "bookings, and let one team own it."
+        ),
+        facts=(
+            CaseFact("Booking", "BTA-26104 - the handoff case, again"),
+            CaseFact("Parent workflow", "Refund assessment"),
+            CaseFact("Child workflow", "The payment-risk gate, embedded as one node"),
+            CaseFact("Gate checks", "Fraud flag, open chargeback"),
+            CaseFact("Gate result", "Blocked - card reported stolen"),
+            CaseFact("What the parent sees", "A typed GateVerdict, never an exception"),
+        ),
+    ),
+    default_prompt="Assess the refund on booking BTA-26104 and propose the amount.",
     nodes=(
         DiagramNode("ext", "extract_reference", "executor"),
-        DiagramNode("gate", "compliance-gate (sub-workflow)", "gate"),
+        DiagramNode("gate", "payment-risk-gate (sub-workflow)", "gate"),
         DiagramNode("screen", "gate_screen", "executor"),
         DiagramNode("branch", "on_gate_verdict", "executor"),
-        DiagramNode("claims", "claims-specialist", "agent"),
+        DiagramNode("billing", "billing-specialist", "agent"),
         DiagramNode("out", "Held | Assessed", "store"),
     ),
     edges=(
-        DiagramEdge("ext", "gate", "shipment id"),
+        DiagramEdge("ext", "gate", "booking id"),
         DiagramEdge("gate", "screen", "inner graph", "dashed"),
         DiagramEdge("screen", "branch", "GateVerdict"),
         DiagramEdge("branch", "out", "blocked", "dashed"),
-        DiagramEdge("branch", "claims", "cleared"),
-        DiagramEdge("claims", "out", "settlement"),
+        DiagramEdge("branch", "billing", "cleared"),
+        DiagramEdge("billing", "out", "refund"),
     ),
     prompt_examples=(
         PromptExample(
-            ending="HELD BY COMPLIANCE GATE",
-            prompt="Screen BFG-24086 through the compliance gate, then assess the claim.",
-            why="Consignee fails sanctions screening. The claims agent is never invoked at all.",
+            ending="HELD BY PAYMENT RISK GATE",
+            prompt="Screen BTA-26104 through the payment-risk gate, then assess the refund.",
+            why="The card was reported stolen. The billing agent is never invoked at all.",
         ),
         PromptExample(
-            ending="HELD BY COMPLIANCE GATE",
-            prompt="Screen BFG-24084 through the compliance gate, then assess the claim.",
-            why="Cleared consignee, but HS 3004.20 needs an import licence - the other way to be held.",
+            ending="HELD BY PAYMENT RISK GATE",
+            prompt="Screen BTA-26112 through the payment-risk gate, then assess the refund.",
+            why=(
+                "A clean card - but the customer's bank already has a chargeback open, and refunding too would pay "
+                "twice."
+            ),
         ),
         PromptExample(
             ending="CLEARED AND ASSESSED",
-            prompt="Screen BFG-24081 through the compliance gate, then assess the claim.",
-            why="Clear consignee, no licence required, so the gate passes it to the claims agent.",
+            prompt="Screen BTA-26107 through the payment-risk gate, then assess the refund.",
+            why="No fraud flag, no chargeback, so the gate passes it to the billing agent.",
         ),
     ),
     devui_name="SubWorkflow",

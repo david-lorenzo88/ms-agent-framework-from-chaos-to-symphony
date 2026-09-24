@@ -3,12 +3,14 @@
 Usage:  python scripts/smoke.py [slug ...]
 
 Exits non-zero if any pattern fails, so CI and a pre-session sanity check are
-the same command. It also checks four claims that nothing else would catch:
+the same command. It also checks six claims that nothing else would catch:
 what DevUI would ask for before running a pattern (see
 ``chaos_to_symphony.devui_input``), whether each branching pattern's example
 prompts still reach the endings they advertise, whether the Agents panel can
-still read every agent's prompt and tools out of the built workflow, and
-whether the group chat can still be ended early by a talkative chair.
+still read every agent's prompt and tools out of the built workflow, whether
+the group chat can still be ended early by a talkative chair, whether the
+briefing copy the audience reads still matches the store it describes, and
+whether a resumed checkpoint re-runs work it had already finished.
 """
 
 from __future__ import annotations
@@ -20,6 +22,8 @@ from pathlib import Path
 
 sys.path.insert(0, str(Path(__file__).resolve().parent.parent / "src"))
 
+from chaos_to_symphony.domain import ROLES  # noqa: E402
+from chaos_to_symphony.memory import BOOKING_REF, INVOICE_REF, STORE  # noqa: E402
 from chaos_to_symphony.registry import PATTERNS, get  # noqa: E402
 from chaos_to_symphony.scripted import reset_context  # noqa: E402
 
@@ -171,9 +175,8 @@ def check_group_chat_termination() -> int:
     Offline never exercises this. The scripted chair is written to open without
     a figure, so a condition reading only the text passes every local run - and
     then a live model, asked to open the meeting, writes the whole committee
-    itself in one turn ("Specialist 2, Commercial: the declared value is EUR
-    96,500"), the chair's opening carries a figure, and the meeting ends at
-    round 0 with three agents who never spoke.
+    itself in one turn, figures and all, the chair's opening carries a figure,
+    and the meeting ends at round 0 with three agents who never spoke.
 
     Provider-independent, because it is the condition being tested rather than
     any client: hand it transcripts and see what it says.
@@ -189,22 +192,22 @@ def check_group_chat_termination() -> int:
         return message
 
     monologue = (
-        "Decision to be made: whether BFG-24082 merits compensation.\n"
-        "Specialist 2, Commercial: the declared value is EUR 96,500."
+        "Decision to be made: whether BTA-26103 merits compensation.\n"
+        "Specialist 2, Commercial: the package cost EUR 5,430."
     )
     cases = [
         ("chair opens alone while quoting a figure",
          [turn(None, "Agree a settlement."), turn(CHAIR, monologue)], False),
         ("a specialist quotes money mid-debate",
          [turn(None, "x"), turn(CHAIR, monologue),
-          turn("pricing-specialist", "Modelled exposure EUR 8,041.")], False),
+          turn("pricing-specialist", "Price difference EUR 1,400.")], False),
         ("chair sums up after the specialists",
          [turn(None, "x"), turn(CHAIR, monologue),
-          turn("pricing-specialist", "Modelled exposure EUR 8,041."),
-          turn(CHAIR, "Settlement agreed at EUR 9,650.")], True),
+          turn("pricing-specialist", "Price difference EUR 1,400."),
+          turn(CHAIR, "Settlement agreed at EUR 2,000.")], True),
         ("chair sums up naming no figure",
          [turn(None, "x"), turn(CHAIR, monologue),
-          turn("pricing-specialist", "Modelled exposure EUR 8,041."),
+          turn("pricing-specialist", "Price difference EUR 1,400."),
           turn(CHAIR, "Let us reconvene tomorrow.")], False),
     ]
 
@@ -225,7 +228,7 @@ def check_group_chat_termination() -> int:
 
     from chaos_to_symphony.patterns.p03_group_chat import MAX_ROUNDS, committee_selector
 
-    seats = ["claims-manager", "pricing-specialist", "legal-counsel", "ops-account-lead"]
+    seats = [CHAIR, "pricing-specialist", "legal-counsel", "account-lead"]
     picks = [
         committee_selector(
             SimpleNamespace(current_round=r, participants=dict.fromkeys(seats), conversation=[])
@@ -241,6 +244,83 @@ def check_group_chat_termination() -> int:
         print(f"  Group chat:  settles only after a real debate ({len(cases)} transcripts), "
               f"never the same speaker twice")
     return failures
+
+
+def check_case_briefs(specs) -> int:
+    """Every pattern explains its own case, and the explanation matches the store.
+
+    The briefing copy names bookings and invoices, and the store is the only
+    place they exist. Renumber a seed row and the prose on stage becomes a lie
+    that nothing else would catch - the pattern still runs, the diagram still
+    lights up, and the card confidently describes a booking that is not there.
+    So every reference in the copy is resolved against the store, and the roles
+    the domain page advertises are resolved against the agents the patterns
+    really build.
+    """
+    failures = 0
+    cited = 0
+
+    for spec in specs:
+        brief = spec.case
+        if brief is None or not brief.about.strip() or not brief.why.strip():
+            print(f"  [FAIL] {spec.name}: no case brief; its screen would explain nothing")
+            failures += 1
+            continue
+        # Facts carry most of the references, so check the whole card, not the prose.
+        whole = " ".join([brief.about, brief.why, *(f"{f.label} {f.value}" for f in brief.facts)])
+        references = ((BOOKING_REF, STORE.bookings, "booking"), (INVOICE_REF, STORE.invoices, "invoice"))
+        for pattern, table, kind in references:
+            for ref in sorted(set(pattern.findall(whole))):
+                cited += 1
+                if ref not in table:
+                    print(f"  [FAIL] {spec.name}: case brief cites {kind} {ref}, which is not in the store")
+                    failures += 1
+
+    # The domain page's cast list has to be agents that exist somewhere.
+    from chaos_to_symphony.introspect import agents_in
+
+    built: set[str] = set()
+    for spec in PATTERNS:
+        try:
+            for agent in agents_in(spec.build()):
+                built.add(str(agent.get("name", "")))
+        except Exception:  # a build failure is already reported by the run above
+            continue
+    for role in ROLES:
+        if role.term not in built:
+            print(f"  [FAIL] domain briefing names '{role.term}', which no pattern builds")
+            failures += 1
+
+    if not failures:
+        print(f"  Domain:      {len(specs)} case briefs, {cited} references resolved, {len(ROLES)} roles real")
+    return failures
+
+
+async def check_checkpoint_resume() -> int:
+    """The resumed instance picks up at stage two - it does not run stage one again.
+
+    The run is killed once stage one is checkpointed, and a new instance
+    resumes. Kill it on the stage's own completion event instead and the
+    checkpoint that covers it has not been written yet, so the new instance
+    quietly re-runs stage one - the replayed side effect this pattern warns
+    about, happening on stage. Nothing else notices: the demo still finishes and
+    still prints a letter, so only a check on *what ran* catches it.
+    """
+    from chaos_to_symphony.patterns import p11_checkpoint_resume as p11
+
+    stages = [agent.name for agent in p11._participants()]
+    # Twice, because the store outlives a run: a second demo in the same
+    # process must resume its own run, not the first one's finished checkpoint.
+    for attempt in (1, 2):
+        reset_context()
+        notes = await p11.demo(p11.SPEC.default_prompt)
+        resumed = next((n for n in notes if n.startswith("Resumed from the checkpoint")), "")
+        ran = resumed.split("the new instance ran ", 1)[-1]
+        if stages[0] in ran.split(" - ")[0] or stages[-1] not in ran:
+            print(f"  [FAIL] checkpoint resume, run {attempt}: {resumed or notes[-1:]}")
+            return 1
+    print(f"  Checkpoint:  resumed at stage two, twice in one process - {stages[0]} never re-runs")
+    return 0
 
 
 async def main() -> int:
@@ -259,6 +339,8 @@ async def main() -> int:
     failures += await check_prompt_examples(specs)
     failures += check_agent_configs(specs)
     failures += check_group_chat_termination()
+    failures += check_case_briefs(specs)
+    failures += await check_checkpoint_resume()
     return 1 if failures else 0
 
 

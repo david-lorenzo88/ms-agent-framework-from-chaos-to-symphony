@@ -85,9 +85,10 @@ go back through `run(responses=...)`; the difference is only whether the
 response carries any messages.
 
 That means a send-back is only visible if the proposal actually changes. The
-offline settlement agent therefore re-prices: it opens at a tenth of the
-declared value capped by the goodwill ceiling, and concedes on each send-back
-down to the customer's approval threshold, quoting what it came down from. The
+offline settlement agent therefore re-prices: it opens at the capped estimate —
+services not delivered plus the tier's daily allowance — and concedes on each
+send-back down to the customer's approval threshold, quoting what it came down
+from. The
 modal names the round, because the gate reopening within a second of a click
 otherwise reads as a button that did nothing.
 
@@ -117,9 +118,9 @@ Two details make that demonstrable rather than accidental:
   `max_rounds` a backstop you can actually reach rather than a crash.
 - **And it asks whether a debate happened at all.** Reading the text is not
   enough once a real model is writing it: asked to open the meeting, one wrote
-  the entire committee itself in a single turn — *"Specialist 2, Commercial:
-  the declared value is EUR 96,500"* — so the chair's opening carried a figure
-  and the meeting ended at round 0 with three agents who never spoke. Whether
+  the entire committee itself in a single turn, every specialist's position and
+  figure included — so the chair's opening carried a figure and the meeting
+  ended at round 0 with three agents who never spoke. Whether
   anyone else has taken a turn is a fact about the transcript, not about the
   prose, and no amount of fluent writing can fake it.
 - **The chair closes early, not on the last permitted round.** Close on the cap
@@ -150,7 +151,7 @@ modal.
 
 Worth knowing before you run this live, because it is the one way offline
 flatters the demo. `ScriptedChatClient` reads the in-memory store directly: ask
-it to "triage exception BFG-24084" and it looks the shipment up and answers
+it to "triage incident BTA-26109" and it looks the booking up and answers
 from the real record. A live model asked the same thing sees a string that
 looks like a reference and nothing else.
 
@@ -158,13 +159,17 @@ That is invisible until an agent's answer decides something. Conditional
 routing's classifier had no tools, so against Foundry it graded every case the
 same safe middle way and every run landed on the medium branch — the routing
 looked broken when the agent had simply never been told anything. It now holds
-`lookup_shipment`, and is told to use it before grading.
+`lookup_booking`, and is told to use it before grading.
 
 The rule that follows: **an agent whose output steers the graph needs its own
 way to get the facts.** An agent late in a chain is usually fine, because the
 agents before it put their findings in the shared conversation — the writers in
 sequential, human-in-the-loop and checkpoint-resume have no tools and do not
-need any. An agent that speaks *first* has only the prompt.
+need any. An agent that speaks *first* has only the prompt: that is why the
+reflection loop's writer holds `lookup_booking` and `check_eu261`, and so does
+its reviewer, which cannot reject a promise of EU261 money without knowing
+whether it is owed. The same goes for handoff triage and `screen_payment` — a
+stolen card is not in the booking record.
 
 ### The diagram only ever describes the last run
 
@@ -173,9 +178,9 @@ changed*, and nothing is claimed until you press **Run pattern** again.
 
 That is not cosmetic. Loading an example is one click, and without it you get
 the previous run's branch sitting in green above a prompt that would route
-somewhere else entirely — pick *MAJOR INCIDENT DESK* after running the
+somewhere else entirely — pick *DUTY DESK* after running the
 standard-queue case and `standard_queue` stays lit, which reads as conditional
-routing being broken. The log is left alone: every line names its own shipment,
+routing being broken. The log is left alone: every line names its own booking,
 it is the record of what actually happened, and the next run clears it anyway.
 
 ### Why only one specialist lights up
@@ -193,6 +198,35 @@ specialists green on the one pattern whose whole point is that exactly one was
 chosen. The runner now skips the broadcasts when colouring boxes and says so in
 the log instead, so the mechanism is still visible without the diagram claiming
 work that never happened.
+
+### Explaining the domain, and each case
+
+Twelve patterns share one story, and an attendee who does not know what a
+travel incident is cannot follow any of the twelve. Two places say so:
+
+- **The domain** — the button in the top bar, and in the corner of every case
+  card. A briefing on Baltic Travel Agency: what the business does, the five
+  incident kinds, what a customer's tier controls, the cast of specialists,
+  the ten tools they can call, and the five facts that decide every demo.
+  It is assembled from the live store (`src/chaos_to_symphony/domain.py`), so
+  the counts and thresholds it shows are the ones the agents work against.
+  The button glows until it has been opened once. It deliberately does *not*
+  open itself: a modal over the page on load swallows the first click, which
+  breaks `scripts/drive.py` — and would do the same to a speaker presenting
+  from a fresh browser profile.
+- **What this case is about** — a card on every pattern screen, between the
+  pattern card and the diagram. What is happening in the business, the hard
+  numbers from the store, and *why this case, for this pattern* — because the
+  cases were chosen so each pattern's argument is visible in the run, and if
+  that reasoning only lives in the speaker's head the twelve demos look
+  interchangeable. It comes from each pattern's own `CaseBrief`.
+
+`make smoke` resolves every booking and invoice the copy cites against the
+store, and every role the briefing names against the agents the patterns really
+build. Prose is easy to leave out of a test suite, and it is exactly the thing
+that rots quietly: renumber a seed row and every pattern still runs, every
+diagram still lights up, and the card confidently describes a booking that is
+not there.
 
 ### Seeing what each agent actually is
 
@@ -222,9 +256,16 @@ bump could empty the panel without anything raising an error.
 
 Four of the twelve branch, and which branch you get is decided by the case you
 type, not by the pattern. Conditional routing has three terminal desks,
-sub-workflow composition either holds a consignment at the gate or passes it
-through, the reflection loop either gets an approval or hits its revision
-ceiling, and handoff routes to one of four specialists.
+sub-workflow composition either holds a refund at the payment-risk gate or
+passes it through, the reflection loop either gets an approval or hits its
+revision ceiling, and handoff routes to one of four specialists.
+
+The reflection loop's endings follow from the letter policy, not from luck.
+The offline reviewer applies the same four rules its prompt gives a live model
+— no EU261 money that is not owed, the traveller's rights stated, a date on
+every promise, no admission of liability — so the strike letter fails twice for
+two different reasons and passes on the third draft, and the letter whose refund
+waits on a silent hotel can never be dated and escalates.
 
 Those patterns show an **endings box** under the *Run it* prompt: one prompt per
 ending, each naming where it lands and the fact in the case that sends it there.
@@ -271,7 +312,7 @@ so the showcase captures the same telemetry itself rather than making you run
 the pattern twice.
 
 Routing runs through DevUI's `/v1/responses` API instead was tried and rejected:
-the in-memory store lives per process, so the audit trail and stock of shipments
+the in-memory store lives per process, so the audit trail and the book of trips
 would mutate inside DevUI and vanish from this page, the human-in-the-loop
 approval gate would break, and patterns 11 and 12 drive their workflow more than
 once and cannot go through that API at all.
@@ -346,16 +387,28 @@ counter, so concurrent participants cannot interfere with each other's script.
 
 ## The data
 
-A fictional Tallinn freight forwarder, **Baltic Freight Group**: twenty
-shipments, seven customers, a tariff schedule and three SLA bands, all held in
-process memory (`src/chaos_to_symphony/memory.py`). No database, no disk, no
-network. The store is frozen except for its audit trail, so an agent that
-"updates" a shipment has to go through `record()` and the trail can never
-silently miss a decision.
+A Riga travel agency, **Baltic Travel Agency**: twenty bookings — flights,
+hotels and activities — for twelve customers, three tier policies, twenty hotels
+across two channel managers with three days of sync logs, and sixteen supplier
+invoices, all held in process memory (`src/chaos_to_symphony/memory.py`). No
+database, no disk, no network. The store is frozen except for its audit trail,
+so an agent that "updates" a booking has to go through `record()` and the trail
+can never silently miss a decision.
 
-Every pattern works the same exception data, so switching pattern on the site
+Places, airports, airlines, hotels, SiteMinder and GetYourGuide carry real
+names, so the demo sounds like the industry it is set in. The travellers, their
+bookings and every incident are invented; none of it describes something that
+actually happened. EU261 and the Package Travel Directive are simplified, but
+every rule the demo leans on is the rule as written — the distance bands come
+from real airport coordinates, and an air traffic control strike really does
+cancel the compensation and not the care.
+
+Every pattern works the same book of trips, so switching pattern on the site
 changes the *orchestration*, not the problem — which is exactly the comparison
 the session is trying to draw.
+
+The site explains all of this to an audience under **The domain** in the top
+bar, built from the store itself rather than written out a second time.
 
 ---
 
@@ -540,12 +593,12 @@ az group delete -n rg-chaos-to-symphony --yes --no-wait
 real `SequentialBuilder`, real handoff tool calls, real checkpointing, real
 OpenTelemetry spans. What is scripted is the *model* — `ScriptedChatClient`
 implements the same `BaseChatClient` contract a provider implements and derives
-its answers from the in-memory freight data.
+its answers from the in-memory travel data.
 
 The consequence worth knowing before you present: on offline, the **decisions**
 are deterministic Python, not model reasoning. Which specialist a handoff routes
 to, when the group chat converges, what the Magentic progress ledger says — all
-computed from the shipment's own fields. The pattern mechanics are genuine; the
+computed from the booking's own fields. The pattern mechanics are genuine; the
 judgement inside them is not. If your point is "watch the orchestration work",
 offline is honest and repeatable. If your point is "watch the *agent decide*",
 run it live.

@@ -28,6 +28,7 @@ from pydantic import BaseModel
 
 from . import __version__, runtime_config, telemetry
 from .clients import effective, provider
+from .domain import brief as domain_brief
 from .introspect import agents_in
 from .memory import STORE
 from .registry import PATTERNS, TIERS, get
@@ -148,6 +149,16 @@ async def patterns() -> dict[str, Any]:
         "tiers": [{"id": t[0], "title": t[1], "blurb": t[2]} for t in TIERS],
         "patterns": [spec.to_dict() for spec in PATTERNS],
     }
+
+
+@app.get("/api/domain")
+async def domain() -> dict[str, Any]:
+    """The business the demos are set in, for the briefing panel.
+
+    Built from the live store, so the counts and thresholds it shows an
+    audience are the ones the agents are actually working against.
+    """
+    return domain_brief()
 
 
 @app.get("/api/devui/entities")
@@ -299,19 +310,19 @@ async def store_summary() -> dict[str, Any]:
     """A read-only peek at the in-memory 'database', for the data panel."""
     return {
         "customers": len(STORE.customers),
-        "shipments": len(STORE.shipments),
-        "openExceptions": len(STORE.open_exceptions()),
-        "tariffLines": len(STORE.tariffs),
+        "bookings": len(STORE.bookings),
+        "openIncidents": len(STORE.open_incidents()),
+        "invoices": len(STORE.invoices),
         "rows": [
             {
-                "id": s.id,
-                "lane": s.lane,
-                "goods": s.goods,
-                "exception": s.exception.value if s.exception else "-",
-                "severity": s.severity.value,
-                "valueEur": s.declared_value_eur,
+                "id": b.id,
+                "trip": b.trip,
+                "route": b.route,
+                "incident": b.incident.value.replace("_", " ") if b.incident else "-",
+                "severity": b.severity.value if b.incident else "-",
+                "valueEur": b.package_price_eur,
             }
-            for s in sorted(STORE.shipments.values(), key=lambda s: s.id)
+            for b in sorted(STORE.bookings.values(), key=lambda b: b.id)
         ],
     }
 

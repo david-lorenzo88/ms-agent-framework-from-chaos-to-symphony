@@ -1,7 +1,8 @@
 """Pattern 1 - Sequential.
 
-A fixed pipeline: intake enriches the case, customs classifies it, the drafter
-writes the customer reply. Each participant sees everything said before it.
+A fixed pipeline: intake states what changed, the trip planner rebuilds the
+trip around it, the writer tells the family. Each participant sees everything
+said before it.
 
 The point on stage: this is the cheapest, most auditable pattern, and most
 "multi-agent" problems are really this one. Reach for anything fancier only
@@ -13,46 +14,47 @@ from __future__ import annotations
 from agent_framework import Agent
 from agent_framework.orchestrations import SequentialBuilder
 
-from ..base import DiagramEdge, DiagramNode, PatternSpec
+from ..base import CaseBrief, CaseFact, DiagramEdge, DiagramNode, PatternSpec
 from ..clients import chat_client
-from ..tools import CASE_TOOLS, CUSTOMS_TOOLS
+from ..tools import INTAKE_TOOLS, PLANNER_TOOLS
 
 
 def build():
-    """Intake -> Customs -> Drafter, sharing one growing conversation."""
+    """Intake -> Trip planner -> Writer, sharing one growing conversation."""
     intake = Agent(
         client=chat_client("intake-agent"),
         name="intake-agent",
-        description="Pulls the consignment record and states the facts of the exception.",
+        description="Pulls the booking and states what changed.",
         instructions=(
-            "You are freight exception intake at Baltic Freight Group. Retrieve the shipment, "
-            "state what went wrong in two sentences, and name the customer and their tier. "
-            "Do not propose a remedy."
+            "You are incident intake at Baltic Travel Agency. Look the booking up, state what went wrong "
+            "in two sentences, and name the customer and their tier. Do not propose a remedy."
         ),
-        tools=CASE_TOOLS,
+        tools=INTAKE_TOOLS,
     )
-    customs = Agent(
-        client=chat_client("customs-agent"),
-        name="customs-agent",
-        description="Classifies the goods and flags licence or duty problems.",
+    planner = Agent(
+        client=chat_client("trip-planner"),
+        name="trip-planner",
+        description="Rebuilds the itinerary around a changed flight.",
         instructions=(
-            "You are a customs classification specialist. Using the facts above, classify the HS code, "
-            "state the duty rate, and flag any licence requirement that could hold the consignment."
+            "You rebuild trips around disruption. Using the facts above, work out when the travellers now "
+            "arrive, which hotel nights to release so they are not charged as a no-show, and when each "
+            "activity they would miss can move to - check live slots, and only offer one with room for the "
+            "whole party. Check the flight against EU261 and say who owes what."
         ),
-        tools=CUSTOMS_TOOLS,
+        tools=PLANNER_TOOLS,
     )
-    drafter = Agent(
+    writer = Agent(
         client=chat_client("writer-agent"),
         name="writer-agent",
-        description="Writes the customer-facing reply.",
+        description="Writes the customer letter.",
         instructions=(
-            "You write the customer reply. Acknowledge the problem, state the cause plainly, "
-            "commit to a dated next step. Never admit legal liability."
+            "You write the customer letter. State what happened and what has been done, put a date on "
+            "every commitment, and say who owes any compensation. Never admit legal liability."
         ),
     )
     return SequentialBuilder(
         name="Sequential",
-        participants=[intake, customs, drafter],
+        participants=[intake, planner, writer],
         output_from="all",
     ).build()
 
@@ -85,20 +87,48 @@ SPEC = PatternSpec(
         "later stage, and the confident final answer hides it. Mitigate with a verification participant, or "
         "structured output between stages so a malformed hand-off fails loudly instead of silently."
     ),
-    scenario="BFG-24084: vaccine cartons held at Vaalimaa customs for a missing import licence reference.",
-    default_prompt="Shipment BFG-24084 is held at customs. Work the exception and draft the customer reply.",
+    scenario="BTA-26101: airBaltic cancels a family's flight to Barcelona two days out. Everything after it moves.",
+    case=CaseBrief(
+        about=(
+            "Two days before the Kalniņš family fly to Barcelona, airBaltic cancels their Saturday flight and moves "
+            "them to the same flight on Sunday. That one change runs through the whole trip: unless someone tells the "
+            "hotel, their first night at Catalonia Plaza Catalunya becomes a no-show they pay for, and the Sagrada "
+            "Família tour booked for Saturday afternoon happens without them. The family needs one letter that says "
+            "what has been fixed, what they are owed, and by whom."
+        ),
+        why=(
+            "The work has a real order to it. You cannot move the tour before you know when the family lands, and you "
+            "cannot write to them before the plan exists. Three agents, one after another: intake pulls the booking "
+            "and states what changed; the trip planner rebuilds the trip around the new flight - releases the first "
+            "hotel night, finds a tour slot after landing with room for four, and checks what EU261 says; the writer "
+            "turns that into one letter. Watch the transcript rather than the answer - each agent appends to the same "
+            "conversation, which is why this pattern is the easy one to put in front of a compliance officer."
+        ),
+        facts=(
+            CaseFact("Booking", "BTA-26101"),
+            CaseFact("Trip", "Barcelona family holiday, 26 Sep - 3 Oct"),
+            CaseFact("Flight", "airBaltic BT651 Riga → Barcelona, cancelled - moved to 27 Sep"),
+            CaseFact("Hotel", "Catalonia Plaza Catalunya, 2 Family Rooms, 7 nights"),
+            CaseFact("Customer", "Kalniņš family, gold tier"),
+            CaseFact("EU261", "EUR 400 each, owed by airBaltic - 2,337 km, cancelled two days out"),
+        ),
+    ),
+    default_prompt=(
+        "Booking BTA-26101: airBaltic has cancelled the family's outbound flight to Barcelona. Work the knock-on and "
+        "write to the family."
+    ),
     nodes=(
-        DiagramNode("user", "Case", "store"),
+        DiagramNode("user", "Booking", "store"),
         DiagramNode("intake", "intake-agent", "agent"),
-        DiagramNode("customs", "customs-agent", "agent"),
+        DiagramNode("planner", "trip-planner", "agent"),
         DiagramNode("writer", "writer-agent", "agent"),
-        DiagramNode("out", "Customer reply", "store"),
+        DiagramNode("out", "Customer letter", "store"),
     ),
     edges=(
-        DiagramEdge("user", "intake", "exception"),
-        DiagramEdge("intake", "customs", "facts"),
-        DiagramEdge("customs", "writer", "+ classification"),
-        DiagramEdge("writer", "out", "draft"),
+        DiagramEdge("user", "intake", "incident"),
+        DiagramEdge("intake", "planner", "facts"),
+        DiagramEdge("planner", "writer", "+ new plan"),
+        DiagramEdge("writer", "out", "letter"),
     ),
     devui_name="Sequential",
     build=build,
