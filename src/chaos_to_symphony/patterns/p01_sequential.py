@@ -13,7 +13,7 @@ from __future__ import annotations
 from agent_framework import Agent
 from agent_framework.orchestrations import SequentialBuilder
 
-from ..base import DiagramEdge, DiagramNode, PatternSpec
+from ..base import CaseBrief, CaseFact, DiagramEdge, DiagramNode, PatternSpec
 from ..clients import chat_client
 from ..tools import CASE_TOOLS, CUSTOMS_TOOLS
 
@@ -86,6 +86,29 @@ SPEC = PatternSpec(
         "structured output between stages so a malformed hand-off fails loudly instead of silently."
     ),
     scenario="BFG-24084: vaccine cartons held at Vaalimaa customs for a missing import licence reference.",
+    case=CaseBrief(
+        about=(
+            "A pallet of vaccine cartons left Helsinki for Vilnius and never arrived. Finnish customs at Vaalimaa "
+            "stopped it because the import licence reference is missing from the declaration - and medicaments are a "
+            "licensable commodity, so nothing moves until that is fixed. The customer is Helsinki Pharma Oy, the "
+            "company's largest account, and the cargo is temperature-sensitive and already sitting still."
+        ),
+        why=(
+            "The work has a real order to it. You cannot classify the tariff position before someone has pulled the "
+            "consignment record, and you cannot write to the customer before you know what customs actually want. "
+            "Three agents, one after another: intake gets the facts, customs decides the licence position, the writer "
+            "turns it into a letter. Watch the transcript rather than the answer - each agent appends to the same "
+            "conversation, which is why this pattern is the easy one to put in front of a compliance officer."
+        ),
+        facts=(
+            CaseFact("Shipment", "BFG-24084"),
+            CaseFact("Lane", "Helsinki to Vilnius (FI-LT)"),
+            CaseFact("Goods", "Vaccine cartons, HS 3004.20 - licence required"),
+            CaseFact("Declared value", "EUR 310,000"),
+            CaseFact("Customer", "Helsinki Pharma Oy, gold tier"),
+            CaseFact("Status", "Held at the border, still undelivered"),
+        ),
+    ),
     default_prompt="Shipment BFG-24084 is held at customs. Work the exception and draft the customer reply.",
     nodes=(
         DiagramNode("user", "Case", "store"),

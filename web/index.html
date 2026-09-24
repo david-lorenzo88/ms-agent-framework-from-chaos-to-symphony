@@ -20,6 +20,9 @@
   </div>
   <div class="topbar-status">
     <span class="pill" id="providerPill" title="Which chat client the demos are using">provider …</span>
+    <button class="pill pill-btn pill-domain" id="domainBtn" title="What business are these demos set in?">
+      The domain
+    </button>
     <a class="pill pill-link" id="devuiLink" href="#" target="_blank" rel="noopener">DevUI</a>
     <button class="pill pill-btn" id="settingsBtn" title="Provider settings" aria-label="Provider settings">
       Settings
@@ -74,6 +77,21 @@
       <div class="api">
         <h3>Agent Framework API</h3>
         <ul id="pApi"></ul>
+      </div>
+    </article>
+
+    <!-- What the demo is actually about, for an audience that has never seen
+         a freight desk. Filled from the pattern's own CaseBrief. -->
+    <article class="card card-case">
+      <header class="card-head">
+        <h3>What this case is about</h3>
+        <button class="btn btn-small btn-ghost" id="caseDomainLink" type="button">The domain</button>
+      </header>
+      <p class="case-about" id="caseAbout"></p>
+      <dl class="case-facts" id="caseFacts"></dl>
+      <div class="case-why">
+        <h4>Why this case, for this pattern</h4>
+        <p id="caseWhy"></p>
       </div>
     </article>
 
@@ -181,6 +199,26 @@
       <h3 class="stage-pane-head">Interaction diagram</h3>
       <div class="stage-slot" id="stageDiagram"></div>
     </section>
+  </div>
+</div>
+
+<!-- ─── the domain briefing ────────────────────────────────────── -->
+<div class="modal-backdrop" id="domainModal" hidden>
+  <div class="modal modal-wide modal-tall" role="dialog" aria-modal="true" aria-labelledby="domainTitle">
+    <header class="domain-head">
+      <div>
+        <h3 id="domainTitle">…</h3>
+        <p class="modal-sub" id="domainTagline"></p>
+      </div>
+      <button class="btn" type="button" id="domainClose">Close</button>
+    </header>
+
+    <div class="domain-body" id="domainBody">
+      <div class="domain-story" id="domainStory"></div>
+      <div class="domain-facts" id="domainFacts"></div>
+      <div class="domain-groups" id="domainGroups"></div>
+      <p class="domain-foot" id="domainFoot"></p>
+    </div>
   </div>
 </div>
 

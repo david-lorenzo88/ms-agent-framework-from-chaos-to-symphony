@@ -12,7 +12,7 @@ from __future__ import annotations
 from agent_framework import Agent
 from agent_framework.orchestrations import ConcurrentBuilder
 
-from ..base import DiagramEdge, DiagramNode, PatternSpec
+from ..base import CaseBrief, CaseFact, DiagramEdge, DiagramNode, PatternSpec
 from ..clients import chat_client
 from ..tools import CASE_TOOLS
 
@@ -84,6 +84,29 @@ SPEC = PatternSpec(
         "instead of surfacing it. Aggregate with an explicit conflict rule, not a summary prompt."
     ),
     scenario="BFG-24088: a trailer of power converters lost between Poznan and Antwerp, EUR 133,000 declared.",
+    case=CaseBrief(
+        about=(
+            "An entire trailer of power converters disappeared somewhere between Poznan and Antwerp. A police report "
+            "is filed; the goods are gone. There is nothing left to inspect, so the only question left is what this "
+            "costs the company - and that question has three different answers depending on who you ask."
+        ),
+        why=(
+            "A total loss is the cleanest case for fanning out, because the three assessments genuinely do not depend "
+            "on each other. Cost models the write-off, legal reads the liability position, ops works out the recovery "
+            "and the replacement. None of them needs another's answer, so they run at once and the clock is the "
+            "slowest one rather than the sum of all three. The subtler point is independence: because no assessor sees "
+            "the others' reasoning, you get three genuinely uncorrelated views - which is the entire basis of ensemble "
+            "reasoning."
+        ),
+        facts=(
+            CaseFact("Shipment", "BFG-24088"),
+            CaseFact("Lane", "Vilnius to Antwerp (LT-BE)"),
+            CaseFact("Goods", "Power converters, 2,900 kg"),
+            CaseFact("Declared value", "EUR 133,000"),
+            CaseFact("Customer", "Vilnius Electronics UAB, gold tier"),
+            CaseFact("Status", "Lost in transit, police report filed"),
+        ),
+    ),
     default_prompt="Shipment BFG-24088 has been lost in transit. Assess it from every angle.",
     nodes=(
         DiagramNode("user", "Case", "store"),

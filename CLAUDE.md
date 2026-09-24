@@ -33,14 +33,21 @@ Three commands, in this order. All three must be clean.
 
 ```bash
 python -m ruff check src scripts deck
-CHAOS_PROVIDER=offline python scripts/smoke.py   # 12/12 + DevUI input, endings, agents
+CHAOS_PROVIDER=offline python scripts/smoke.py   # 12/12 + DevUI input, endings, agents, domain
 python scripts/drive.py                          # needs the site running; 12/12 clean
 ```
 
-`scripts/smoke.py` carries three checks that exist because each guards a claim
+`scripts/smoke.py` carries five checks that exist because each guards a claim
 nothing else would catch: what DevUI asks for before running a pattern, whether
-every example prompt still reaches the ending it advertises, and whether the
-Agents panel can still read each agent's prompt out of the built workflow.
+every example prompt still reaches the ending it advertises, whether the Agents
+panel can still read each agent's prompt out of the built workflow, whether the
+group chat still needs a real debate before it settles, and whether the
+audience-facing copy still matches the store.
+
+That last one guards prose, which is easy to dismiss until you picture it
+failing: renumber a seed shipment and every pattern still runs, every diagram
+still lights up, and the card on screen confidently describes a consignment
+that does not exist. Nothing else in the repo would notice.
 
 ## Offline is not a stand-in for a live model
 

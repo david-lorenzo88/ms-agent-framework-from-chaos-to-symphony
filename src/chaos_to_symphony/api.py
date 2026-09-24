@@ -28,6 +28,7 @@ from pydantic import BaseModel
 
 from . import __version__, runtime_config, telemetry
 from .clients import effective, provider
+from .domain import brief as domain_brief
 from .introspect import agents_in
 from .memory import STORE
 from .registry import PATTERNS, TIERS, get
@@ -148,6 +149,16 @@ async def patterns() -> dict[str, Any]:
         "tiers": [{"id": t[0], "title": t[1], "blurb": t[2]} for t in TIERS],
         "patterns": [spec.to_dict() for spec in PATTERNS],
     }
+
+
+@app.get("/api/domain")
+async def domain() -> dict[str, Any]:
+    """The business the demos are set in, for the briefing panel.
+
+    Built from the live store, so the counts and thresholds it shows an
+    audience are the ones the agents are actually working against.
+    """
+    return domain_brief()
 
 
 @app.get("/api/devui/entities")

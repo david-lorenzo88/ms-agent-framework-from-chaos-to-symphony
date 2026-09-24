@@ -150,3 +150,15 @@ ANALYSIS_TOOLS = [list_open_exceptions, lookup_shipment, get_customer]
 #: classifier that could also write to the audit trail would be a classifier
 #: with side effects, which is not what the routing pattern is demonstrating.
 TRIAGE_TOOLS = [lookup_shipment]
+
+#: Every tool in the demo, for the domain briefing to list. Six read, one
+#: writes - which is the property the audit trail depends on, so keep it true.
+ALL_TOOLS = [
+    lookup_shipment,
+    get_customer,
+    classify_tariff,
+    check_sanctions,
+    estimate_compensation,
+    list_open_exceptions,
+    record_decision,
+]

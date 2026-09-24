@@ -27,7 +27,7 @@ from agent_framework import (
 )
 from typing_extensions import Never
 
-from ..base import DiagramEdge, DiagramNode, PatternSpec
+from ..base import CaseBrief, CaseFact, DiagramEdge, DiagramNode, PatternSpec
 from ..clients import chat_client
 from ..memory import STORE, Severity
 
@@ -202,6 +202,28 @@ SPEC = PatternSpec(
         "explicit about a short result list rather than assuming all N arrived."
     ),
     scenario="Sixteen open exceptions this morning. Which five does the desk work first?",
+    case=CaseBrief(
+        about=(
+            "It is Monday morning. Sixteen shipments on the book are carrying an unresolved exception and the desk "
+            "cannot work sixteen. Somebody has to score every open case on the same criteria and hand the team a "
+            "ranked worklist - the five that matter most, in order, with the reason each one is there."
+        ),
+        why=(
+            "This is a collection, not a case, and that changes the shape of the graph: one source fans a message out "
+            "over many scorers, and a fan-in joins their results into a single list for one reducer. The thing to "
+            "point at is the node count. Only one agent appears in this entire pattern, the summariser at the end. "
+            "Every mapper is ordinary Python, because value times severity weighting is arithmetic and arithmetic does "
+            "not need a language model. Contrast it with Concurrent, two patterns back: that fans agents over one "
+            "input, this fans work over a collection."
+        ),
+        facts=(
+            CaseFact("Scope", "Every open exception on the book"),
+            CaseFact("Open exceptions", "16 of 20 shipments"),
+            CaseFact("Scored on", "Declared value, severity, customer tier, days overdue"),
+            CaseFact("Output", "The ranked five the desk works first"),
+            CaseFact("Agents involved", "One - the rest is Python"),
+        ),
+    ),
     default_prompt="Build today's ranked exception worklist for the Baltic desk.",
     nodes=(
         DiagramNode("disp", "dispatch", "executor"),

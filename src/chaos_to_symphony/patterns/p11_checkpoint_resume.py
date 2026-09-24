@@ -16,7 +16,7 @@ from __future__ import annotations
 from agent_framework import Agent, InMemoryCheckpointStorage
 from agent_framework.orchestrations import SequentialBuilder
 
-from ..base import DiagramEdge, DiagramNode, PatternSpec
+from ..base import CaseBrief, CaseFact, DiagramEdge, DiagramNode, PatternSpec
 from ..clients import chat_client
 from ..memory import STORE
 from ..tools import CASE_TOOLS
@@ -144,6 +144,29 @@ SPEC = PatternSpec(
         "rules as everything else."
     ),
     scenario="A three-stage claim pipeline, interrupted after stage one by a pod restart.",
+    case=CaseBrief(
+        about=(
+            "A consignment of diagnostic kits reached a Warsaw hospital tender three days late and the consignee has "
+            "invoked a penalty clause. It is an ordinary three-stage claim: get the facts, price the exposure, write "
+            "to the customer. Then, halfway through, the pod running it dies."
+        ),
+        why=(
+            "Losing the run would mean re-doing every model call already paid for - and if a human approval were "
+            "sitting in the middle of it, losing their decision too. So this demo proves the recovery the only way "
+            "that counts. It does not pause and continue the same object. It throws the first workflow instance away "
+            "entirely and builds a brand new one, which finishes the job from the checkpoint alone. Watch the log for "
+            "the point where the first instance is discarded. Storage is in memory here; the same interface backs file "
+            "and Cosmos storage."
+        ),
+        facts=(
+            CaseFact("Shipment", "BFG-24090"),
+            CaseFact("Lane", "Helsinki to Warsaw (FI-PL)"),
+            CaseFact("What happened", "Three days late into a hospital tender; penalty clause invoked"),
+            CaseFact("Declared value", "EUR 178,000"),
+            CaseFact("Customer", "Helsinki Pharma Oy, gold tier"),
+            CaseFact("The interruption", "Killed after stage one, resumed in a different instance"),
+        ),
+    ),
     default_prompt="Work the exception on shipment BFG-24090 and write the customer letter.",
     nodes=(
         DiagramNode("s1", "intake-agent", "agent"),

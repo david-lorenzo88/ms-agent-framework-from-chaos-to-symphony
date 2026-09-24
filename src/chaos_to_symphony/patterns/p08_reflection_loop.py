@@ -27,7 +27,7 @@ from agent_framework import (
 )
 from pydantic import BaseModel
 
-from ..base import DiagramEdge, DiagramNode, PatternSpec, PromptExample, parse_structured
+from ..base import CaseBrief, CaseFact, DiagramEdge, DiagramNode, PatternSpec, PromptExample, parse_structured
 from ..clients import chat_client
 from ..memory import STORE
 
@@ -199,6 +199,30 @@ SPEC = PatternSpec(
         "the approve/revise ratio: a critic approving 100% of first drafts has stopped reviewing."
     ),
     scenario="BFG-24095: a dairy temperature excursion. The letter must not admit liability.",
+    case=CaseBrief(
+        about=(
+            "A door seal failed on a chilled dairy load to Copenhagen: ninety minutes at five degrees. The claim "
+            "itself is straightforward. The letter is not. It has to acknowledge what happened and offer a resolution "
+            "without ever admitting liability - because that sentence, once written, is the sentence the customer's "
+            "lawyer reads back in a year."
+        ),
+        why=(
+            "Quality here is testable, which is the precondition for the pattern working at all: does this text admit "
+            "fault, yes or no? So the graph has a cycle. The writer drafts, the reviewer judges against stated "
+            "criteria, and a rejection routes straight back to the writer with the objection attached. Watch the "
+            "revision counter in the log. The interesting part is not the loop, it is the exit - quality plateaus "
+            "after two or three passes, and the ceiling escalates to a person rather than spending the rest of the "
+            "budget trying to satisfy a critic."
+        ),
+        facts=(
+            CaseFact("Shipment", "BFG-24095"),
+            CaseFact("Lane", "Riga to Copenhagen (LV-DK)"),
+            CaseFact("What happened", "Door seal failure; 5 C excursion for 90 minutes"),
+            CaseFact("Declared value", "EUR 62,100"),
+            CaseFact("Customer", "Riga Cold Chain SIA, gold tier"),
+            CaseFact("The acceptance test", "The letter must not admit liability"),
+        ),
+    ),
     default_prompt=(
         "Draft the customer letter for BFG-24095, a temperature excursion on chilled dairy to Copenhagen."
     ),

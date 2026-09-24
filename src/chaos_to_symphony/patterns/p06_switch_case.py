@@ -30,7 +30,7 @@ from agent_framework import (
 from pydantic import BaseModel
 from typing_extensions import Never
 
-from ..base import DiagramEdge, DiagramNode, PatternSpec, PromptExample, parse_structured
+from ..base import CaseBrief, CaseFact, DiagramEdge, DiagramNode, PatternSpec, PromptExample, parse_structured
 from ..clients import chat_client
 from ..memory import STORE
 from ..tools import TRIAGE_TOOLS
@@ -184,6 +184,30 @@ SPEC = PatternSpec(
         "count it, and alert when its share moves."
     ),
     scenario="A new exception arrives with no triage grade. Route it to the right desk in one hop.",
+    case=CaseBrief(
+        about=(
+            "A forklift went through three of twelve pallets of rack PDUs at the Klaipeda hub. The exception has been "
+            "logged but nobody has graded it yet, and until it is graded it sits in no queue at all. Baltic Freight "
+            "has four desks - major incident, claims, customs, standard - and this needs to reach exactly one of them, "
+            "in one hop, now."
+        ),
+        why=(
+            "This is the division of labour that makes graph routing trustworthy: the model classifies, the graph "
+            "decides. A single agent looks the shipment up and produces a typed, validated grade - severity and kind, "
+            "nothing more. Ordinary Python predicates then test that payload in order and deliver it to the first "
+            "match, or to Default. The routing decision is unit-testable and cannot drift, because no model is "
+            "anywhere near the control flow. Try all three example prompts: each one carries a different fact and each "
+            "lands on a different desk."
+        ),
+        facts=(
+            CaseFact("Shipment", "BFG-24099"),
+            CaseFact("Lane", "Vilnius to Hamburg (LT-DE)"),
+            CaseFact("What happened", "Forklift strike; 3 of 12 pallets compromised"),
+            CaseFact("Declared value", "EUR 119,000"),
+            CaseFact("Customer", "Vilnius Electronics UAB, gold tier"),
+            CaseFact("Arrives as", "An exception with no triage grade"),
+        ),
+    ),
     default_prompt=(
         "Shipment BFG-24099 - forklift strike at the Klaipeda hub, 3 of 12 pallets of rack PDUs compromised. "
         "Grade and route this exception."

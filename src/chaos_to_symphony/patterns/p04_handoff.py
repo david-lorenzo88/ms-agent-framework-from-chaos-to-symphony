@@ -13,7 +13,7 @@ from __future__ import annotations
 from agent_framework import Agent, Message
 from agent_framework.orchestrations import HandoffBuilder
 
-from ..base import DiagramEdge, DiagramNode, PatternSpec, PromptExample
+from ..base import CaseBrief, CaseFact, DiagramEdge, DiagramNode, PatternSpec, PromptExample
 from ..clients import chat_client
 from ..tools import CASE_TOOLS, CUSTOMS_TOOLS
 
@@ -150,6 +150,30 @@ SPEC = PatternSpec(
         "never let a mesh topology be the default just because it was less typing."
     ),
     scenario="BFG-24086: a CNC machine from Kaliningrad whose consignee fails sanctions screening.",
+    case=CaseBrief(
+        about=(
+            "A CNC machine is shipping from Kaliningrad into Riga and it is stuck at the border. On the surface this "
+            "is an ordinary customs hold - a machine tool, a licensable HS code, some paperwork. It is not. The "
+            "consignee, Kaliningrad Machinery LLC, fails sanctions screening, which means the correct outcome is not a "
+            "resolved customs case but a frozen consignment and a legal escalation."
+        ),
+        why=(
+            "Nobody can know up front who owns this case, and that is the whole argument for the pattern. Triage reads "
+            "it as a border problem and hands it to the customs specialist, because that is what it looks like. Only "
+            "when somebody actually screens the consignee does it become a compliance case, and ownership moves again. "
+            "The routing is a tool call the model makes with the full case in front of it - not a decision a router "
+            "made before anyone had read the file. Note the topology in the diagram: specialists hand back to triage "
+            "rather than sideways to each other, which is what stops two of them volleying the case between them."
+        ),
+        facts=(
+            CaseFact("Shipment", "BFG-24086"),
+            CaseFact("Lane", "Kaliningrad to Riga (RU-LV)"),
+            CaseFact("Goods", "CNC machine, HS 8479.89 - licence required"),
+            CaseFact("Declared value", "EUR 220,000"),
+            CaseFact("Customer", "Kaliningrad Machinery LLC, bronze tier"),
+            CaseFact("The twist", "Sanctions screening returns: freeze and escalate to legal"),
+        ),
+    ),
     default_prompt="Shipment BFG-24086 is stuck. Route it to the right specialist and resolve it.",
     nodes=(
         DiagramNode("triage", "triage-agent", "orchestrator"),

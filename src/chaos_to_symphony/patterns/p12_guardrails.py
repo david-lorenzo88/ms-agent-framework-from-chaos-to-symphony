@@ -23,7 +23,7 @@ from typing import Any
 from agent_framework import Agent, ChatResponse, ChatResponseUpdate, Message
 from agent_framework.orchestrations import GroupChatBuilder, GroupChatState
 
-from ..base import DiagramEdge, DiagramNode, PatternSpec
+from ..base import CaseBrief, CaseFact, DiagramEdge, DiagramNode, PatternSpec
 from ..clients import chat_client
 from ..memory import STORE
 from ..scripted import ScriptedChatClient
@@ -227,6 +227,31 @@ SPEC = PatternSpec(
         "these fires, and alert on the *rate* - the mitigation working is not the same as the system being well."
     ),
     scenario="The same settlement question, run through a deadlocked committee, a dead provider and a hung call.",
+    case=CaseBrief(
+        about=(
+            "Two pallets of brake discs were crushed in transit and eighteen per cent of the units are unsellable. An "
+            "ordinary claim, and a deliberately boring one - because the shipment is not the subject here. The same "
+            "settlement question is run three times through three systems that are each broken in a different way: a "
+            "committee that will never agree, a model provider returning 503, and a call that simply never comes back."
+        ),
+        why=(
+            "This is not an orchestration pattern. It is the discipline that makes the other eleven survivable, and it "
+            "closes the session because all three of these failures only appear under real load - which is exactly why "
+            "they are absent from every demo the audience has seen all day. Each one is contained by a single line: a "
+            "hard round cap, a labelled fallback path, and a timeout. Watch all three fire. The system degrades in "
+            "every case. It does not fall over in any of them."
+        ),
+        facts=(
+            CaseFact("Shipment", "BFG-24085"),
+            CaseFact("Lane", "Gdansk to Malmo (PL-SE)"),
+            CaseFact("What happened", "Two pallets crushed; 18% of units unsellable"),
+            CaseFact("Declared value", "EUR 58,400"),
+            CaseFact("Customer", "Gdansk Auto Parts, silver tier"),
+            CaseFact("Failure 1", "A committee that never converges - stopped by a round cap"),
+            CaseFact("Failure 2", "The provider returns 503 - caught by a labelled fallback"),
+            CaseFact("Failure 3", "A call that never returns - bounded by a timeout"),
+        ),
+    ),
     default_prompt="Agree the settlement for shipment BFG-24085, where two pallets of brake discs were crushed.",
     nodes=(
         DiagramNode("cap", "max_rounds cap", "gate"),

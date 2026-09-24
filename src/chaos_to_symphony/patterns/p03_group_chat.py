@@ -14,7 +14,7 @@ import re
 from agent_framework import Agent, Message
 from agent_framework.orchestrations import GroupChatBuilder, GroupChatState
 
-from ..base import DiagramEdge, DiagramNode, PatternSpec
+from ..base import CaseBrief, CaseFact, DiagramEdge, DiagramNode, PatternSpec
 from ..clients import chat_client
 from ..tools import CASE_TOOLS
 
@@ -196,6 +196,31 @@ SPEC = PatternSpec(
         "condition that tests for the artefact you actually wanted rather than for a sentiment."
     ),
     scenario="BFG-24082: a reefer failure on chilled salmon to Hamburg. Gold-tier customer, EUR 12,000 ceiling.",
+    case=CaseBrief(
+        about=(
+            "A refrigeration unit failed for six hours on a load of chilled salmon bound for Hamburg, and the core "
+            "temperature reached seven degrees. For food that is not a partial loss, it is a condemned consignment. "
+            "Now four people have to agree what Baltic Freight pays - and they want different things. Pricing wants "
+            "the figure low. Legal wants no admission of fault in writing. The account lead wants to keep a gold-tier "
+            "customer who bills EUR 1.85m a year."
+        ),
+        why=(
+            "This is a decision that has to show its reasoning, which is exactly what a single accumulating thread "
+            "gives you. Every participant reads every prior turn, so positions get challenged and revised in the open "
+            "rather than averaged away in private. Watch the chair: it opens without a figure, lets each specialist "
+            "argue, and only then puts a number on it. The run ends on a structural condition - the chair spoke last, "
+            "at least one specialist spoke before it, and the closing text carries an actual currency amount - not on "
+            "anybody sounding satisfied."
+        ),
+        facts=(
+            CaseFact("Shipment", "BFG-24082"),
+            CaseFact("Lane", "Riga to Hamburg (LV-DE)"),
+            CaseFact("Goods", "Chilled salmon, 11,000 kg"),
+            CaseFact("Declared value", "EUR 96,500"),
+            CaseFact("Customer", "Riga Cold Chain SIA, gold tier"),
+            CaseFact("The constraint", "Goodwill is capped at EUR 12,000"),
+        ),
+    ),
     default_prompt="Shipment BFG-24082 suffered a temperature excursion. Agree a settlement figure.",
     nodes=(
         DiagramNode("chair", "committee-chair", "orchestrator"),

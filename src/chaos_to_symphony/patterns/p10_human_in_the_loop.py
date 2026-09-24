@@ -15,7 +15,7 @@ from __future__ import annotations
 from agent_framework import Agent
 from agent_framework.orchestrations import SequentialBuilder
 
-from ..base import DiagramEdge, DiagramNode, PatternSpec
+from ..base import CaseBrief, CaseFact, DiagramEdge, DiagramNode, PatternSpec
 from ..clients import chat_client
 from ..memory import STORE
 from ..tools import CASE_TOOLS
@@ -118,6 +118,29 @@ SPEC = PatternSpec(
         "answers is an outage that looks like a quiet afternoon."
     ),
     scenario="BFG-24082: a EUR 12,000 goodwill ceiling, gold tier. Anything over EUR 5,000 needs a name against it.",
+    case=CaseBrief(
+        about=(
+            "Back to the condemned salmon. The assessment is done and the settlement agent has a figure - but Riga "
+            "Cold Chain is a gold-tier account, and gold tier means a person has to put their name against anything "
+            "over EUR 5,000. The estimate comes back at EUR 9,650. So the workflow stops."
+        ),
+        why=(
+            "Nobody set a flag to make this demo pause. The arithmetic does it: the tool caps the estimate at the "
+            "tier's goodwill ceiling and returns needs_human_approval because the figure crosses that tier's "
+            "threshold. What happens next is the pattern - the workflow emits a request_info event and suspends, and "
+            "nothing moves until you approve, reject, or send it back with a new instruction. The architectural point "
+            "is that the pause is workflow state, not a held coroutine. This approval could take a weekend. Combined "
+            "with the next pattern's checkpointing, it can outlive the process that started it."
+        ),
+        facts=(
+            CaseFact("Shipment", "BFG-24082"),
+            CaseFact("Customer", "Riga Cold Chain SIA, gold tier"),
+            CaseFact("Estimate", "EUR 9,650"),
+            CaseFact("Goodwill ceiling", "EUR 12,000"),
+            CaseFact("Approval threshold", "EUR 5,000"),
+            CaseFact("Therefore", "needs_human_approval - the run suspends"),
+        ),
+    ),
     default_prompt="Assess shipment BFG-24082 and propose a settlement for approval.",
     nodes=(
         DiagramNode("assess", "cost-assessor", "agent"),

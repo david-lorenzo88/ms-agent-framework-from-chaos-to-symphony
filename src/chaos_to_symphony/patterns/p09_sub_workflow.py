@@ -27,7 +27,7 @@ from agent_framework import (
 )
 from typing_extensions import Never
 
-from ..base import DiagramEdge, DiagramNode, PatternSpec, PromptExample
+from ..base import CaseBrief, CaseFact, DiagramEdge, DiagramNode, PatternSpec, PromptExample
 from ..clients import chat_client
 from ..memory import STORE
 from ..tools import CUSTOMS_TOOLS
@@ -188,6 +188,28 @@ SPEC = PatternSpec(
         "instrumentation, and never let a child's silent success mean 'nothing happened'."
     ),
     scenario="BFG-24086 again - but this time compliance blocks it before any claims work happens.",
+    case=CaseBrief(
+        about=(
+            "The same Kaliningrad CNC machine from the handoff demo - but this time it never reaches a claims "
+            "specialist at all. A compliance gate screens the consignee first, gets the sanctions failure, and blocks "
+            "the case before any settlement work begins."
+        ),
+        why=(
+            "Re-running a case you have already watched is the point. In the handoff pattern the audience saw the "
+            "sanctions problem discovered the slow way, by passing the case around until somebody thought to screen "
+            "the consignee. Here the same fact stops it at the door, in a single node, before a single token is spent "
+            "on pricing. That gate is a complete workflow of its own - own graph, own state, own tests - wrapped in a "
+            "WorkflowExecutor so the parent sees nothing but a message going in and a typed verdict coming out. Build "
+            "it once, embed it in every workflow that needs it, and let one team own it."
+        ),
+        facts=(
+            CaseFact("Shipment", "BFG-24086 - the handoff case, again"),
+            CaseFact("Parent workflow", "Claims assessment"),
+            CaseFact("Child workflow", "The compliance gate, embedded as one node"),
+            CaseFact("Gate result", "Blocked - consignee fails sanctions screening"),
+            CaseFact("What the parent sees", "A typed GateVerdict, never an exception"),
+        ),
+    ),
     default_prompt="Assess the claim on shipment BFG-24086 and propose a settlement.",
     nodes=(
         DiagramNode("ext", "extract_reference", "executor"),

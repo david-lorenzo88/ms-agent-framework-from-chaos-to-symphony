@@ -3,23 +3,27 @@
 Usage:  python scripts/smoke.py [slug ...]
 
 Exits non-zero if any pattern fails, so CI and a pre-session sanity check are
-the same command. It also checks four claims that nothing else would catch:
+the same command. It also checks five claims that nothing else would catch:
 what DevUI would ask for before running a pattern (see
 ``chaos_to_symphony.devui_input``), whether each branching pattern's example
 prompts still reach the endings they advertise, whether the Agents panel can
-still read every agent's prompt and tools out of the built workflow, and
-whether the group chat can still be ended early by a talkative chair.
+still read every agent's prompt and tools out of the built workflow, whether
+the group chat can still be ended early by a talkative chair, and whether the
+briefing copy the audience reads still matches the store it describes.
 """
 
 from __future__ import annotations
 
 import asyncio
+import re
 import sys
 import time
 from pathlib import Path
 
 sys.path.insert(0, str(Path(__file__).resolve().parent.parent / "src"))
 
+from chaos_to_symphony.domain import ROLES  # noqa: E402
+from chaos_to_symphony.memory import STORE  # noqa: E402
 from chaos_to_symphony.registry import PATTERNS, get  # noqa: E402
 from chaos_to_symphony.scripted import reset_context  # noqa: E402
 
@@ -243,6 +247,56 @@ def check_group_chat_termination() -> int:
     return failures
 
 
+def check_case_briefs(specs) -> int:
+    """Every pattern explains its own case, and the explanation matches the store.
+
+    The briefing copy names shipments, and the store is the only place those
+    shipments exist. Renumber a seed row and the prose on stage becomes a lie
+    that nothing else would catch - the pattern still runs, the diagram still
+    lights up, and the card confidently describes a consignment that is not
+    there. So every BFG reference in the copy is resolved against the store,
+    and the roles the domain page advertises are resolved against the agents
+    the patterns really build.
+    """
+    failures = 0
+    ref = re.compile(r"BFG-\d{5}")
+    cited = 0
+
+    for spec in specs:
+        brief = spec.case
+        if brief is None or not brief.about.strip() or not brief.why.strip():
+            print(f"  [FAIL] {spec.name}: no case brief; its screen would explain nothing")
+            failures += 1
+            continue
+        # Facts carry most of the references, so check the whole card, not the prose.
+        whole = " ".join([brief.about, brief.why, *(f"{f.label} {f.value}" for f in brief.facts)])
+        for shipment_id in sorted(set(ref.findall(whole))):
+            cited += 1
+            if shipment_id not in STORE.shipments:
+                print(f"  [FAIL] {spec.name}: case brief cites {shipment_id}, which is not in the store")
+                failures += 1
+
+    # The domain page's cast list has to be agents that exist somewhere.
+    from chaos_to_symphony.introspect import agents_in
+
+    built: set[str] = set()
+    for spec in PATTERNS:
+        try:
+            for agent in agents_in(spec.build()):
+                built.add(str(agent.get("name", "")))
+        except Exception:  # a build failure is already reported by the run above
+            continue
+    for role in ROLES:
+        if role.term not in built:
+            print(f"  [FAIL] domain briefing names '{role.term}', which no pattern builds")
+            failures += 1
+
+    if not failures:
+        print(f"  Domain:      {len(specs)} case briefs, {cited} shipment references resolved, "
+              f"{len(ROLES)} roles real")
+    return failures
+
+
 async def main() -> int:
     wanted = sys.argv[1:]
     specs = [get(s) for s in wanted] if wanted else list(PATTERNS)
@@ -259,6 +313,7 @@ async def main() -> int:
     failures += await check_prompt_examples(specs)
     failures += check_agent_configs(specs)
     failures += check_group_chat_termination()
+    failures += check_case_briefs(specs)
     return 1 if failures else 0
 
 

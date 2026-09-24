@@ -582,3 +582,121 @@ code { font-family: var(--mono); font-size: .88em; }
   .rail { position: static; max-height: none; }
   #railGroups { max-height: 320px; }
 }
+
+/* ── what this case is about ─────────────────────────────────────
+   Between the pattern card and the diagram: the business problem, in the
+   audience's language, before they are asked to read a graph.
+   ──────────────────────────────────────────────────────────────── */
+
+.card-case { border-left: 4px solid var(--steel); }
+.card-case[hidden] { display: none; }
+.btn-ghost {
+  border-color: transparent; background: #F2F6FB; color: var(--steel);
+  font-weight: 700;
+}
+.btn-ghost:hover { background: #E7EFF7; color: var(--navy); }
+
+.case-about {
+  margin: 0; font-size: .92rem; line-height: 1.65; color: var(--ink);
+}
+
+.case-facts {
+  display: grid; grid-template-columns: auto 1fr; gap: .34rem .9rem;
+  margin: 1.05rem 0 0; padding: .85rem 1rem;
+  background: #F7FAFD; border: 1px solid var(--line); border-radius: var(--radius-sm);
+  font-size: .81rem;
+}
+.case-facts dt { color: var(--ink-faint); font-weight: 600; white-space: nowrap; }
+.case-facts dd { margin: 0; color: var(--navy); font-weight: 600; }
+
+.case-why {
+  margin-top: 1.05rem; padding-top: .95rem; border-top: 1px dashed var(--line);
+}
+.case-why h4 {
+  margin: 0 0 .4rem; font-size: .75rem; font-weight: 700;
+  text-transform: uppercase; letter-spacing: .07em; color: var(--amber-warm);
+}
+.case-why p { margin: 0; font-size: .86rem; line-height: 1.62; color: var(--ink-soft); }
+
+/* ── the domain briefing ─────────────────────────────────────────
+   A modal rather than a panel: it is read once to set the scene, then
+   reopened from the topbar when somebody needs a term again.
+   ──────────────────────────────────────────────────────────────── */
+
+.pill-domain { font-weight: 700; }
+
+/* Until it has been opened once: "start here", without taking the page away.
+   Honours a reduced-motion preference by holding the lit state instead. */
+.pill-domain.is-fresh {
+  background: var(--amber); border-color: var(--amber); color: var(--navy-deep);
+  animation: domain-glow 2.4s ease-in-out infinite;
+}
+@keyframes domain-glow {
+  0%, 100% { box-shadow: 0 0 0 0 rgba(255,189,99,.55); }
+  50%      { box-shadow: 0 0 0 6px rgba(255,189,99,0); }
+}
+@media (prefers-reduced-motion: reduce) {
+  .pill-domain.is-fresh { animation: none; }
+}
+
+.modal-tall { max-width: 860px; max-height: 88vh; display: flex; flex-direction: column; }
+.domain-head {
+  display: flex; align-items: flex-start; justify-content: space-between; gap: 1.5rem;
+  flex: none;
+}
+.domain-head .modal-sub { margin-bottom: 0; }
+
+.domain-body {
+  overflow-y: auto; margin-top: 1.1rem; padding-right: .5rem; flex: 1 1 auto;
+}
+
+.domain-story p {
+  margin: 0 0 .75rem; font-size: .92rem; line-height: 1.66; color: var(--ink);
+}
+.domain-story p:first-child { font-size: 1rem; }
+
+.domain-facts {
+  display: grid; grid-template-columns: repeat(auto-fit, minmax(122px, 1fr));
+  gap: .55rem; margin: 1.2rem 0 1.5rem;
+}
+.domain-fact {
+  display: flex; flex-direction: column; gap: .15rem;
+  padding: .7rem .8rem; border-radius: var(--radius-sm);
+  background: #F7FAFD; border: 1px solid var(--line);
+}
+.domain-fact-value {
+  font-family: var(--mono); font-size: 1.35rem; font-weight: 700;
+  color: var(--navy); line-height: 1;
+}
+.domain-fact-label { font-size: .7rem; color: var(--ink-faint); line-height: 1.35; }
+
+.domain-group { margin-bottom: 1.5rem; }
+.domain-group h4 {
+  margin: 0 0 .25rem; font-size: .8rem; font-weight: 700;
+  text-transform: uppercase; letter-spacing: .07em; color: var(--navy);
+}
+.domain-group-blurb {
+  margin: 0 0 .7rem; font-size: .82rem; color: var(--ink-soft); line-height: 1.55;
+}
+.domain-terms {
+  display: grid; grid-template-columns: minmax(150px, auto) 1fr; gap: .42rem 1rem;
+  margin: 0; font-size: .83rem;
+}
+.domain-terms dt {
+  color: var(--navy); font-weight: 700;
+  font-family: var(--mono); font-size: .78rem; line-height: 1.5;
+}
+.domain-terms dd { margin: 0; color: var(--ink-soft); line-height: 1.55; }
+
+.domain-foot {
+  margin: .4rem 0 0; padding: .8rem .95rem; border-radius: var(--radius-sm);
+  background: #F7FAFD; border: 1px solid var(--line);
+  font-size: .8rem; color: var(--ink-soft); line-height: 1.55;
+}
+
+@media (max-width: 720px) {
+  .case-facts,
+  .domain-terms { grid-template-columns: 1fr; gap: .15rem; }
+  .case-facts dd,
+  .domain-terms dd { margin-bottom: .45rem; }
+}

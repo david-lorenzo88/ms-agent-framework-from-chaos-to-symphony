@@ -14,7 +14,7 @@ from __future__ import annotations
 from agent_framework import Agent
 from agent_framework.orchestrations import MagenticBuilder
 
-from ..base import DiagramEdge, DiagramNode, PatternSpec
+from ..base import CaseBrief, CaseFact, DiagramEdge, DiagramNode, PatternSpec
 from ..clients import chat_client
 from ..tools import ANALYSIS_TOOLS, CASE_TOOLS
 
@@ -107,6 +107,30 @@ SPEC = PatternSpec(
         "plan review for anything that touches money or customers."
     ),
     scenario="Three separate exceptions on the Klaipeda ferry route in a fortnight. Is the lane the cause?",
+    case=CaseBrief(
+        about=(
+            "This one is not about a shipment. Three separate exceptions have touched the Klaipeda ferry route inside "
+            "a fortnight - two ferry cancellations and a forklift strike at the hub - and all three belong to the same "
+            "customer. No individual case looks like a pattern. Somebody has to ask whether the lane itself is the "
+            "problem, and then put a number on what it has cost."
+        ),
+        why=(
+            "There is no procedure for this. You do not know in advance whether the answer needs the list of open "
+            "exceptions, a lookup on each one, a customer cross-reference, or a cost model - and that is precisely the "
+            "situation the manager agent exists for. It keeps a ledger of what it knows and what it still needs, "
+            "delegates one step at a time to whichever specialist fits, reads the result, and revises the plan. Watch "
+            "the ledger rather than the agents. And watch the round count: a language model is deciding how much work "
+            "this takes, which is why all three ceilings are set."
+        ),
+        facts=(
+            CaseFact("The lane", "Klaipeda, on the LT-NL and LT-DE routes"),
+            CaseFact("Incidents", "BFG-24081 and BFG-24093 (ferry cancelled), BFG-24099 (forklift strike)"),
+            CaseFact("Window", "A fortnight"),
+            CaseFact("All three belong to", "Vilnius Electronics UAB, gold tier"),
+            CaseFact("Combined declared value", "EUR 508,000"),
+            CaseFact("The question", "Is the lane the root cause, and what is the exposure?"),
+        ),
+    ),
     default_prompt=(
         "Several Vilnius shipments are late this month. Investigate whether the Klaipeda lane is the root "
         "cause and total the financial exposure."

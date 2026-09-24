@@ -194,6 +194,35 @@ chosen. The runner now skips the broadcasts when colouring boxes and says so in
 the log instead, so the mechanism is still visible without the diagram claiming
 work that never happened.
 
+### Explaining the domain, and each case
+
+Twelve patterns share one story, and an attendee who does not know what a
+freight exception is cannot follow any of the twelve. Two places say so:
+
+- **The domain** — the button in the top bar, and in the corner of every case
+  card. A briefing on Baltic Freight Group: what the business does, the five
+  exception kinds, what a customer's tier controls, the cast of specialists,
+  the seven tools they can call, and the four facts that decide every demo.
+  It is assembled from the live store (`src/chaos_to_symphony/domain.py`), so
+  the counts and thresholds it shows are the ones the agents work against.
+  The button glows until it has been opened once. It deliberately does *not*
+  open itself: a modal over the page on load swallows the first click, which
+  breaks `scripts/drive.py` — and would do the same to a speaker presenting
+  from a fresh browser profile.
+- **What this case is about** — a card on every pattern screen, between the
+  pattern card and the diagram. What is happening in the business, the hard
+  numbers from the store, and *why this case, for this pattern* — because the
+  cases were chosen so each pattern's argument is visible in the run, and if
+  that reasoning only lives in the speaker's head the twelve demos look
+  interchangeable. It comes from each pattern's own `CaseBrief`.
+
+`make smoke` resolves every shipment the copy cites against the store, and
+every role the briefing names against the agents the patterns really build.
+Prose is easy to leave out of a test suite, and it is exactly the thing that
+rots quietly: renumber a seed row and every pattern still runs, every diagram
+still lights up, and the card confidently describes a consignment that is not
+there.
+
 ### Seeing what each agent actually is
 
 The **Agents** tab lists every agent in the selected pattern with its system
@@ -356,6 +385,9 @@ silently miss a decision.
 Every pattern works the same exception data, so switching pattern on the site
 changes the *orchestration*, not the problem — which is exactly the comparison
 the session is trying to draw.
+
+The site explains all of this to an audience under **The domain** in the top
+bar, built from the store itself rather than written out a second time.
 
 ---
 
