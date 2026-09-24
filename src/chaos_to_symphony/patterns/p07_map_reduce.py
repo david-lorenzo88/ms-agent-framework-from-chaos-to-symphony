@@ -210,16 +210,16 @@ SPEC = PatternSpec(
         ),
         why=(
             "This is a collection, not a case, and that changes the shape of the graph: one source fans a message out "
-            "over many scorers, and a fan-in joins their results into a single list for one reducer. The thing to "
+            "to three scorers, and a fan-in joins their results into a single list for one reducer. The thing to "
             "point at is the node count. Only one agent appears in this entire pattern, the summariser at the end. "
-            "Every mapper is ordinary Python, because value times severity weighting is arithmetic and arithmetic does "
-            "not need a language model. Contrast it with Concurrent, two patterns back: that fans agents over one "
-            "input, this fans work over a collection."
+            "Every mapper is ordinary Python, because adding a severity weight, a value band and a tier bonus is "
+            "arithmetic, and arithmetic does not need a language model. Contrast it with Concurrent, two patterns "
+            "back: that fans agents over one input, this fans work over a collection."
         ),
         facts=(
             CaseFact("Scope", "Every open exception on the book"),
             CaseFact("Open exceptions", "16 of 20 shipments"),
-            CaseFact("Scored on", "Declared value, severity, customer tier, days overdue"),
+            CaseFact("Scored on", "Severity, declared value, customer tier - three scorers, summed"),
             CaseFact("Output", "The ranked five the desk works first"),
             CaseFact("Agents involved", "One - the rest is Python"),
         ),

@@ -158,12 +158,14 @@ SPEC = PatternSpec(
             "resolved customs case but a frozen consignment and a legal escalation."
         ),
         why=(
-            "Nobody can know up front who owns this case, and that is the whole argument for the pattern. Triage reads "
-            "it as a border problem and hands it to the customs specialist, because that is what it looks like. Only "
-            "when somebody actually screens the consignee does it become a compliance case, and ownership moves again. "
-            "The routing is a tool call the model makes with the full case in front of it - not a decision a router "
-            "made before anyone had read the file. Note the topology in the diagram: specialists hand back to triage "
-            "rather than sideways to each other, which is what stops two of them volleying the case between them."
+            "The surface of this case points at the wrong owner, and that is the whole argument for the pattern. It is "
+            "filed as a customs hold, so a router working from that one field would send it to customs. Triage does "
+            "not: it reads the case with the customer record in front of it, sees the sanctions failure, and hands it "
+            "straight to the compliance specialist. The routing is a tool call the model makes with the full case in "
+            "view - not a decision a router made from one field before anyone had read the file. The example prompts "
+            "make the point: two customs holds, two different owners. Note the topology in the diagram: specialists "
+            "hand back to triage rather than sideways to each other, which is what stops two of them volleying the "
+            "case between them."
         ),
         facts=(
             CaseFact("Shipment", "BFG-24086"),

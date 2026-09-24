@@ -187,17 +187,18 @@ SPEC = PatternSpec(
     case=CaseBrief(
         about=(
             "A forklift went through three of twelve pallets of rack PDUs at the Klaipeda hub. The exception has been "
-            "logged but nobody has graded it yet, and until it is graded it sits in no queue at all. Baltic Freight "
-            "has four desks - major incident, claims, customs, standard - and this needs to reach exactly one of them, "
-            "in one hop, now."
+            "logged but nobody has graded it yet, and until it is graded it sits in no queue at all. It has to land "
+            "in exactly one of three places - the major incident desk, the standard queue, or the watchlist - in one "
+            "hop, now."
         ),
         why=(
             "This is the division of labour that makes graph routing trustworthy: the model classifies, the graph "
             "decides. A single agent looks the shipment up and produces a typed, validated grade - severity and kind, "
             "nothing more. Ordinary Python predicates then test that payload in order and deliver it to the first "
-            "match, or to Default. The routing decision is unit-testable and cannot drift, because no model is "
-            "anywhere near the control flow. Try all three example prompts: each one carries a different fact and each "
-            "lands on a different desk."
+            "match, or to Default: critical and high to the major incident desk, medium to the standard queue, "
+            "anything else to the watchlist. The routing decision is unit-testable and cannot drift, because no model "
+            "is anywhere near the control flow. Try all three example prompts: each carries a different severity and "
+            "each lands somewhere different."
         ),
         facts=(
             CaseFact("Shipment", "BFG-24099"),
