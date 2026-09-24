@@ -141,7 +141,7 @@ function fillList(host, items) {
 }
 
 /**
- * The business case, for an audience that has never seen a freight desk.
+ * The business case, for an audience that has never seen a travel desk.
  *
  * Every pattern carries one, so the card is never empty - but guard anyway,
  * because an older API response without `case` should degrade to a hidden card
@@ -506,10 +506,10 @@ function handleFrame(frame) {
  * prompt and they are answering a question nobody asked any more - and a green
  * branch is read as this prompt's answer, not the previous one's. Loading an
  * example made that easy to hit: one click swaps the prompt and leaves the
- * previous run lit, so picking "MAJOR INCIDENT DESK" after running the
+ * previous run lit, so picking "DUTY DESK" after running the
  * standard-queue case shows standard_queue in green above it.
  *
- * The log is left alone. It names its own shipment in every line, it is the
+ * The log is left alone. It names its own booking in every line, it is the
  * record of what happened, and wiping it on a keystroke would throw away
  * something worth reading. The next run clears it anyway.
  */
@@ -625,8 +625,8 @@ function showApproval(frame) {
   const facts = $('approvalFacts');
   facts.innerHTML = '';
   const labels = {
-    shipment: 'Shipment', customer: 'Customer', tier: 'Tier',
-    declaredValueEur: 'Declared value', approvalThresholdEur: 'Approval threshold',
+    booking: 'Booking', customer: 'Customer', tier: 'Tier',
+    packagePriceEur: 'Package price', approvalThresholdEur: 'Approval threshold',
     goodwillCeilingEur: 'Goodwill ceiling',
   };
   for (const [key, label] of Object.entries(labels)) {
@@ -771,16 +771,16 @@ function renderAudit(rows) {
 async function loadStore() {
   const data = await (await fetch('/api/store')).json();
   $('storeNote').textContent =
-    `${data.shipments} shipments, ${data.customers} customers, ${data.tariffLines} tariff lines, ` +
-    `${data.openExceptions} open exceptions — all held in process memory. No database.`;
+    `${data.bookings} bookings, ${data.customers} customers, ${data.invoices} supplier invoices, ` +
+    `${data.openIncidents} open incidents — all held in process memory. No database.`;
   const body = $('storeTable').querySelector('tbody');
   body.innerHTML = '';
   for (const row of data.rows) {
     const tr = el('tr');
     tr.appendChild(el('td', null, row.id));
-    tr.appendChild(el('td', null, row.lane));
-    tr.appendChild(el('td', null, row.goods));
-    tr.appendChild(el('td', null, row.exception));
+    tr.appendChild(el('td', null, row.trip));
+    tr.appendChild(el('td', null, row.route));
+    tr.appendChild(el('td', null, row.incident));
     tr.appendChild(el('td', null, row.severity));
     const value = el('td', 'right', 'EUR ' + row.valueEur.toLocaleString('en-GB'));
     tr.appendChild(value);
@@ -1078,7 +1078,7 @@ function agentCard(agent) {
 
 /* ── the domain briefing ──────────────────────────────────────────
    Twelve patterns against one story. An attendee who does not know what a
-   freight exception is cannot follow any of the twelve, so the briefing is one
+   travel incident is cannot follow any of the twelve, so the briefing is one
    click away from the topbar and from every pattern's own case card.
 
    It deliberately does NOT open itself. A modal over the page on first load

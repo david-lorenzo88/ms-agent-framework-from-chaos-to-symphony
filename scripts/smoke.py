@@ -16,7 +16,6 @@ whether a resumed checkpoint re-runs work it had already finished.
 from __future__ import annotations
 
 import asyncio
-import re
 import sys
 import time
 from pathlib import Path
@@ -24,7 +23,7 @@ from pathlib import Path
 sys.path.insert(0, str(Path(__file__).resolve().parent.parent / "src"))
 
 from chaos_to_symphony.domain import ROLES  # noqa: E402
-from chaos_to_symphony.memory import STORE  # noqa: E402
+from chaos_to_symphony.memory import BOOKING_REF, INVOICE_REF, STORE  # noqa: E402
 from chaos_to_symphony.registry import PATTERNS, get  # noqa: E402
 from chaos_to_symphony.scripted import reset_context  # noqa: E402
 
@@ -176,9 +175,8 @@ def check_group_chat_termination() -> int:
     Offline never exercises this. The scripted chair is written to open without
     a figure, so a condition reading only the text passes every local run - and
     then a live model, asked to open the meeting, writes the whole committee
-    itself in one turn ("Specialist 2, Commercial: the declared value is EUR
-    96,500"), the chair's opening carries a figure, and the meeting ends at
-    round 0 with three agents who never spoke.
+    itself in one turn, figures and all, the chair's opening carries a figure,
+    and the meeting ends at round 0 with three agents who never spoke.
 
     Provider-independent, because it is the condition being tested rather than
     any client: hand it transcripts and see what it says.
@@ -194,22 +192,22 @@ def check_group_chat_termination() -> int:
         return message
 
     monologue = (
-        "Decision to be made: whether BFG-24082 merits compensation.\n"
-        "Specialist 2, Commercial: the declared value is EUR 96,500."
+        "Decision to be made: whether BTA-26103 merits compensation.\n"
+        "Specialist 2, Commercial: the package cost EUR 5,430."
     )
     cases = [
         ("chair opens alone while quoting a figure",
          [turn(None, "Agree a settlement."), turn(CHAIR, monologue)], False),
         ("a specialist quotes money mid-debate",
          [turn(None, "x"), turn(CHAIR, monologue),
-          turn("pricing-specialist", "Modelled exposure EUR 8,041.")], False),
+          turn("pricing-specialist", "Price difference EUR 1,400.")], False),
         ("chair sums up after the specialists",
          [turn(None, "x"), turn(CHAIR, monologue),
-          turn("pricing-specialist", "Modelled exposure EUR 8,041."),
-          turn(CHAIR, "Settlement agreed at EUR 9,650.")], True),
+          turn("pricing-specialist", "Price difference EUR 1,400."),
+          turn(CHAIR, "Settlement agreed at EUR 2,000.")], True),
         ("chair sums up naming no figure",
          [turn(None, "x"), turn(CHAIR, monologue),
-          turn("pricing-specialist", "Modelled exposure EUR 8,041."),
+          turn("pricing-specialist", "Price difference EUR 1,400."),
           turn(CHAIR, "Let us reconvene tomorrow.")], False),
     ]
 
@@ -230,7 +228,7 @@ def check_group_chat_termination() -> int:
 
     from chaos_to_symphony.patterns.p03_group_chat import MAX_ROUNDS, committee_selector
 
-    seats = ["claims-manager", "pricing-specialist", "legal-counsel", "ops-account-lead"]
+    seats = [CHAIR, "pricing-specialist", "legal-counsel", "account-lead"]
     picks = [
         committee_selector(
             SimpleNamespace(current_round=r, participants=dict.fromkeys(seats), conversation=[])
@@ -251,16 +249,15 @@ def check_group_chat_termination() -> int:
 def check_case_briefs(specs) -> int:
     """Every pattern explains its own case, and the explanation matches the store.
 
-    The briefing copy names shipments, and the store is the only place those
-    shipments exist. Renumber a seed row and the prose on stage becomes a lie
+    The briefing copy names bookings and invoices, and the store is the only
+    place they exist. Renumber a seed row and the prose on stage becomes a lie
     that nothing else would catch - the pattern still runs, the diagram still
-    lights up, and the card confidently describes a consignment that is not
-    there. So every BFG reference in the copy is resolved against the store,
-    and the roles the domain page advertises are resolved against the agents
-    the patterns really build.
+    lights up, and the card confidently describes a booking that is not there.
+    So every reference in the copy is resolved against the store, and the roles
+    the domain page advertises are resolved against the agents the patterns
+    really build.
     """
     failures = 0
-    ref = re.compile(r"BFG-\d{5}")
     cited = 0
 
     for spec in specs:
@@ -271,11 +268,13 @@ def check_case_briefs(specs) -> int:
             continue
         # Facts carry most of the references, so check the whole card, not the prose.
         whole = " ".join([brief.about, brief.why, *(f"{f.label} {f.value}" for f in brief.facts)])
-        for shipment_id in sorted(set(ref.findall(whole))):
-            cited += 1
-            if shipment_id not in STORE.shipments:
-                print(f"  [FAIL] {spec.name}: case brief cites {shipment_id}, which is not in the store")
-                failures += 1
+        references = ((BOOKING_REF, STORE.bookings, "booking"), (INVOICE_REF, STORE.invoices, "invoice"))
+        for pattern, table, kind in references:
+            for ref in sorted(set(pattern.findall(whole))):
+                cited += 1
+                if ref not in table:
+                    print(f"  [FAIL] {spec.name}: case brief cites {kind} {ref}, which is not in the store")
+                    failures += 1
 
     # The domain page's cast list has to be agents that exist somewhere.
     from chaos_to_symphony.introspect import agents_in
@@ -293,8 +292,7 @@ def check_case_briefs(specs) -> int:
             failures += 1
 
     if not failures:
-        print(f"  Domain:      {len(specs)} case briefs, {cited} shipment references resolved, "
-              f"{len(ROLES)} roles real")
+        print(f"  Domain:      {len(specs)} case briefs, {cited} references resolved, {len(ROLES)} roles real")
     return failures
 
 

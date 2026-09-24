@@ -7,7 +7,7 @@ each with the mechanism that contains it:
 1. **The runaway loop** - a committee that never agrees, stopped by a round cap.
 2. **The dead specialist** - an agent whose provider is down, contained by a
    fallback path rather than a stack trace.
-3. **The hung call** - a tool that never returns, contained by a timeout.
+3. **The hung call** - an availability check that never returns, contained by a timeout.
 
 The point on stage: every one of these is invisible in a demo and inevitable in
 production. None of the mitigations are exotic; all three are missing from most
@@ -92,14 +92,14 @@ def build():
         client=chat_client("legal-counsel"),
         name="legal-counsel",
         description="Will never concede the point.",
-        instructions="Argue that the settlement is too generous. Never concede.",
+        instructions="Argue that any goodwill on top of the refund is too generous. Never concede.",
         tools=CASE_TOOLS,
     )
     b = Agent(
-        client=chat_client("ops-account-lead"),
-        name="ops-account-lead",
+        client=chat_client("account-lead"),
+        name="account-lead",
         description="Will also never concede.",
-        instructions="Argue that the settlement is too mean. Never concede.",
+        instructions="Argue that a refund alone is too mean. Never concede.",
         tools=CASE_TOOLS,
     )
     return GroupChatBuilder(
@@ -134,7 +134,7 @@ async def _assess_with_fallback(prompt: str) -> tuple[str, str]:
             client=chat_client("cost-assessor"),
             name="cost-assessor",
             description="The degraded path: less specialised, still useful.",
-            instructions="Give a conservative cost band for this exception. Flag it as an estimate.",
+            instructions="Give a conservative cost band for this incident. Flag it as an estimate.",
             tools=CASE_TOOLS,
         )
         response = await generalist.run(prompt)
@@ -142,12 +142,17 @@ async def _assess_with_fallback(prompt: str) -> tuple[str, str]:
 
 
 async def _assess_with_timeout(prompt: str) -> tuple[str, str]:
-    """Bound a call that may never return."""
+    """Bound a call that may never return.
+
+    In travel this is the failure that bites daily: availability calls to
+    channel managers and airline systems hang, and a quote that waits for them
+    is a quote that never gets sent.
+    """
     slow = Agent(
-        client=SlowChatClient("risk-scorer"),
-        name="risk-scorer",
+        client=SlowChatClient("availability-check"),
+        name="availability-check",
         description="Correct, but far too slow.",
-        instructions="Score the residual risk.",
+        instructions="Confirm live availability for a replacement trip with the channel manager.",
     )
     try:
         response = await asyncio.wait_for(slow.run(prompt), timeout=TOOL_TIMEOUT_SECONDS)
@@ -155,8 +160,8 @@ async def _assess_with_timeout(prompt: str) -> tuple[str, str]:
     except asyncio.TimeoutError:
         STORE.record("guardrail:timeout", "abandon", f">{TOOL_TIMEOUT_SECONDS}s", pattern="guardrails")
         return "timeout", (
-            f"Risk scoring abandoned after {TOOL_TIMEOUT_SECONDS}s. Proceeding without a risk score and "
-            "flagging the case for manual review."
+            f"Availability check abandoned after {TOOL_TIMEOUT_SECONDS}s. Quoting from cached availability "
+            "and flagging the booking for manual confirmation."
         )
 
 
@@ -226,39 +231,45 @@ SPEC = PatternSpec(
         "fallback that serves most traffic is an outage nobody has noticed. Emit a metric every time one of "
         "these fires, and alert on the *rate* - the mitigation working is not the same as the system being well."
     ),
-    scenario="The same settlement question, run through a deadlocked committee, a dead provider and a hung call.",
+    scenario=(
+        "The same goodwill question, run through a deadlocked committee, a dead provider and a hung availability "
+        "check."
+    ),
     case=CaseBrief(
         about=(
-            "Two pallets of brake discs were crushed in transit and eighteen per cent of the units are unsellable. An "
-            "ordinary claim, and a deliberately boring one - because the shipment is not the subject here. The same "
-            "settlement question is run three times through three systems that are each broken in a different way: a "
-            "committee that will never agree, a model provider returning 503, and a call that simply never comes back."
+            "A storm warning cancelled Jonas Petrauskas's day trip to the Curonian Spit - the Smiltynė ferry was not "
+            "running. The refund is not in question. What is: whether to add a goodwill gesture, and how much. An "
+            "ordinary question, and a deliberately boring one, because the booking is not the subject here. The same "
+            "question is run three times through three systems that are each broken in a different way: a committee "
+            "that will never agree, a model provider returning 503, and an availability check that never comes back."
         ),
         why=(
             "This is not an orchestration pattern. It is the discipline that makes the other eleven survivable, and it "
             "closes the session because all three of these failures only appear under real load - which is exactly why "
             "they are absent from every demo the audience has seen all day. Each one is contained by a single line: a "
-            "hard round cap, a labelled fallback path, and a timeout. Watch all three fire. The system degrades in "
-            "every case. It does not fall over in any of them."
+            "hard round cap, a labelled fallback path, and a timeout. In travel the third is the one that bites daily: "
+            "availability calls to channel managers and airline systems hang, and a quote that waits for them never "
+            "gets sent. Watch all three fire. The system degrades in every case. It does not fall over in any of them."
         ),
         facts=(
-            CaseFact("Shipment", "BFG-24085"),
-            CaseFact("Lane", "Gdansk to Malmo (PL-SE)"),
-            CaseFact("What happened", "Two pallets crushed; 18% of units unsellable"),
-            CaseFact("Declared value", "EUR 58,400"),
-            CaseFact("Customer", "Gdansk Auto Parts, silver tier"),
+            CaseFact("Booking", "BTA-26113"),
+            CaseFact("Trip", "Klaipėda and the Curonian Spit"),
+            CaseFact("What happened", "Day trip cancelled - storm warning, ferry suspended"),
+            CaseFact("Customer", "Jonas Petrauskas, silver tier"),
             CaseFact("Failure 1", "A committee that never converges - stopped by a round cap"),
             CaseFact("Failure 2", "The provider returns 503 - caught by a labelled fallback"),
-            CaseFact("Failure 3", "A call that never returns - bounded by a timeout"),
+            CaseFact("Failure 3", "An availability check that never returns - bounded by a timeout"),
         ),
     ),
-    default_prompt="Agree the settlement for shipment BFG-24085, where two pallets of brake discs were crushed.",
+    default_prompt=(
+        "Agree the goodwill gesture for booking BTA-26113, where the Curonian Spit day trip was cancelled in a storm."
+    ),
     nodes=(
         DiagramNode("cap", "max_rounds cap", "gate"),
         DiagramNode("loop", "Deadlocked committee", "orchestrator"),
         DiagramNode("primary", "pricing-specialist (503)", "agent"),
         DiagramNode("fb", "cost-assessor (fallback)", "agent"),
-        DiagramNode("slow", "risk-scorer (hangs)", "agent"),
+        DiagramNode("slow", "availability-check (hangs)", "agent"),
         DiagramNode("to", "timeout 1.5s", "gate"),
         DiagramNode("out", "Degraded answer", "store"),
     ),

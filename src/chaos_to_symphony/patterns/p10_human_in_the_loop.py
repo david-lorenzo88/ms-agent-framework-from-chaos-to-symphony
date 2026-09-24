@@ -18,7 +18,7 @@ from agent_framework.orchestrations import SequentialBuilder
 from ..base import CaseBrief, CaseFact, DiagramEdge, DiagramNode, PatternSpec
 from ..clients import chat_client
 from ..memory import STORE
-from ..tools import CASE_TOOLS
+from ..tools import CASE_TOOLS, estimate_compensation, lookup_booking, record_decision
 
 #: The agent whose output needs signing off. Everything before it runs freely.
 APPROVAL_AGENT = "settlement-agent"
@@ -29,8 +29,11 @@ def build():
     assessor = Agent(
         client=chat_client("cost-assessor"),
         name="cost-assessor",
-        description="Quantifies the loss.",
-        instructions="Quantify the loss on this shipment and state the goodwill ceiling for the customer's tier.",
+        description="Quantifies what the incident costs the agency.",
+        instructions=(
+            "Quantify what this booking's incident costs us - services not delivered plus the tier's "
+            "allowance - and state the goodwill ceiling and approval threshold for the customer's tier."
+        ),
         tools=CASE_TOOLS,
     )
     settlement = Agent(
@@ -41,7 +44,7 @@ def build():
             "Propose a settlement figure in EUR with a one-line justification. "
             "This proposal is subject to human approval before it is sent."
         ),
-        tools=CASE_TOOLS,
+        tools=[lookup_booking, estimate_compensation, record_decision],
     )
     letter = Agent(
         client=chat_client("writer-agent"),
@@ -67,17 +70,16 @@ def build():
 
 def approval_context(prompt: str) -> dict[str, object]:
     """What the approver needs on screen to decide. Read from the in-memory store."""
-    reference = next((sid for sid in STORE.shipments if sid in prompt), None)
-    if reference is None:
+    booking = STORE.booking_in(prompt)
+    if booking is None:
         return {}
-    shipment = STORE.shipments[reference]
-    customer = STORE.customers.get(shipment.customer_id)
-    policy = STORE.policy_for(shipment.customer_id)
+    customer = STORE.customers.get(booking.customer_id)
+    policy = STORE.policy_for(booking.customer_id)
     return {
-        "shipment": shipment.id,
+        "booking": booking.id,
         "customer": customer.name if customer else "unknown",
         "tier": customer.tier if customer else "unknown",
-        "declaredValueEur": shipment.declared_value_eur,
+        "packagePriceEur": booking.package_price_eur,
         "approvalThresholdEur": policy.approval_threshold_eur if policy else None,
         "goodwillCeilingEur": policy.max_goodwill_eur if policy else None,
     }
@@ -117,31 +119,36 @@ SPEC = PatternSpec(
         "case, and give the approver the figures, not the transcript. Then alarm the queue: a gate nobody "
         "answers is an outage that looks like a quiet afternoon."
     ),
-    scenario="BFG-24082: a EUR 12,000 goodwill ceiling, gold tier. Anything over EUR 5,000 needs a name against it.",
+    scenario=(
+        "BTA-26103: EUR 2,000 for a honeymoon suite sold twice. Gold tier - anything over EUR 1,000 needs a name "
+        "against it."
+    ),
     case=CaseBrief(
         about=(
-            "Back to the condemned salmon. The assessment is done and the settlement agent has a figure - but Riga "
-            "Cold Chain is a gold-tier account, and gold tier means a person has to put their name against anything "
-            "over EUR 5,000. The estimate comes back at EUR 9,650. So the workflow stops."
+            "Back to the Dubrovnik honeymoon. The assessment is done and the settlement agent has a figure: EUR 1,400 "
+            "for the five nights the couple did not get the suite they paid for, plus the gold tier's allowance of EUR "
+            "120 a day - EUR 2,000. Elīna and Mārtiņš Ozols are gold-tier customers, and on the gold tier a person has "
+            "to put their name against anything over EUR 1,000. So the workflow stops."
         ),
         why=(
-            "Nobody set a flag to make this demo pause. The arithmetic does it: the tool caps the estimate at the "
-            "tier's goodwill ceiling and returns needs_human_approval because the figure crosses that tier's "
-            "threshold. What happens next is the pattern - the workflow emits a request_info event and suspends, and "
-            "nothing moves until you approve, reject, or send it back with a new instruction. The architectural point "
-            "is that the pause is workflow state, not a held coroutine. This approval could take a weekend. Combined "
-            "with the next pattern's checkpointing, it can outlive the process that started it."
+            "Nobody set a flag to make this demo pause. The arithmetic does it: the tool adds the services not "
+            "delivered to the tier's allowance, caps the total at the goodwill ceiling, and returns "
+            "needs_human_approval because the figure crosses the threshold. What happens next is the pattern - the "
+            "workflow emits a request_info event and suspends, and nothing moves until you approve, or send it back to "
+            "be re-priced. The architectural point is that the pause is workflow state, not a held coroutine. This "
+            "approval could take a weekend. Combined with the next pattern's checkpointing, it can outlive the process "
+            "that started it."
         ),
         facts=(
-            CaseFact("Shipment", "BFG-24082"),
-            CaseFact("Customer", "Riga Cold Chain SIA, gold tier"),
-            CaseFact("Estimate", "EUR 9,650"),
-            CaseFact("Goodwill ceiling", "EUR 12,000"),
-            CaseFact("Approval threshold", "EUR 5,000"),
+            CaseFact("Booking", "BTA-26103"),
+            CaseFact("Customer", "Elīna and Mārtiņš Ozols, gold tier"),
+            CaseFact("Estimate", "EUR 2,000 - EUR 1,400 not delivered + EUR 600 allowance"),
+            CaseFact("Goodwill ceiling", "EUR 2,500"),
+            CaseFact("Approval threshold", "EUR 1,000"),
             CaseFact("Therefore", "needs_human_approval - the run suspends"),
         ),
     ),
-    default_prompt="Assess shipment BFG-24082 and propose a settlement for approval.",
+    default_prompt="Assess booking BTA-26103 and propose a settlement for approval.",
     nodes=(
         DiagramNode("assess", "cost-assessor", "agent"),
         DiagramNode("settle", "settlement-agent", "agent"),

@@ -15,7 +15,15 @@ from agent_framework.orchestrations import HandoffBuilder
 
 from ..base import CaseBrief, CaseFact, DiagramEdge, DiagramNode, PatternSpec, PromptExample
 from ..clients import chat_client
-from ..tools import CASE_TOOLS, CUSTOMS_TOOLS
+from ..tools import (
+    FLIGHT_TOOLS,
+    HANDOFF_TRIAGE_TOOLS,
+    HOTEL_TOOLS,
+    PAYMENT_TOOLS,
+    lookup_booking,
+    record_decision,
+    screen_payment,
+)
 
 
 def resolved(conversation: list[Message]) -> bool:
@@ -44,75 +52,88 @@ def resolved(conversation: list[Message]) -> bool:
 def build():
     """Triage fans out to four specialists; specialists can bounce back to triage."""
     triage = Agent(
-        client=chat_client("triage-agent"),
+        # Two tool calls offline: one to screen the payment, one to route on the
+        # answer - the same two a live model makes when it follows the prompt.
+        client=chat_client("triage-agent", tool_budget=2),
         name="triage-agent",
         description="First contact. Decides which specialist owns the case.",
         instructions=(
-            "You triage freight exceptions. Read the case, then hand off to the specialist who should own it. "
-            "Do not attempt to resolve it yourself."
+            "You triage incidents at Baltic Travel Agency. Look the booking up and screen its payment before "
+            "routing anything: a payment that fails screening goes to risk, whatever the incident is. "
+            "Otherwise route by the incident - flights, hotels, or billing for refunds. Hand off to the "
+            "specialist who should own it; do not attempt to resolve it yourself."
         ),
         # Handoff short-circuits on the routing tool call, so each agent must keep
         # its own history in step with the service. The builder refuses without this.
         require_per_service_call_history_persistence=True,
-        tools=CASE_TOOLS,
+        tools=HANDOFF_TRIAGE_TOOLS,
     )
-    customs = Agent(
-        client=chat_client("customs-specialist"),
-        name="customs-specialist",
-        description="Owns customs holds, tariff classification and import licences.",
-        instructions="Resolve customs holds. Classify the code, identify the missing document, state the release path.",
-        # Handoff short-circuits on the routing tool call, so each agent must keep
-        # its own history in step with the service. The builder refuses without this.
-        require_per_service_call_history_persistence=True,
-        tools=CUSTOMS_TOOLS,
-    )
-    compliance = Agent(
-        client=chat_client("compliance-specialist"),
-        name="compliance-specialist",
-        description="Owns sanctions screening failures and frozen consignments.",
+    flights = Agent(
+        client=chat_client("flights-specialist"),
+        name="flights-specialist",
+        description="Owns cancellations, delays and the airline's EU261 claim.",
         instructions=(
-            "Handle sanctions and compliance failures. If the consignee fails screening, state plainly that "
-            "the consignment stays frozen and legal must review. Never authorise release yourself."
+            "Resolve flight disruption. Check the flight against EU261, state what the airline owes and the "
+            "care it must provide, and the traveller's rights. We file the claim; we do not pay it."
         ),
         # Handoff short-circuits on the routing tool call, so each agent must keep
         # its own history in step with the service. The builder refuses without this.
         require_per_service_call_history_persistence=True,
-        tools=CUSTOMS_TOOLS,
+        tools=FLIGHT_TOOLS,
     )
-    claims = Agent(
-        client=chat_client("claims-specialist"),
-        name="claims-specialist",
-        description="Owns damage, loss and temperature-excursion claims.",
-        instructions="Handle damage, loss and temperature claims. Quantify the loss and propose a settlement.",
+    hotels = Agent(
+        client=chat_client("hotels-specialist"),
+        name="hotels-specialist",
+        description="Owns overbookings, downgrades and rehousing.",
+        instructions=(
+            "Resolve hotel problems. Establish what happened from the booking and the channel-manager log, "
+            "and find where the travellers sleep if the hotel cannot house them."
+        ),
         # Handoff short-circuits on the routing tool call, so each agent must keep
         # its own history in step with the service. The builder refuses without this.
         require_per_service_call_history_persistence=True,
-        tools=CASE_TOOLS,
+        tools=HOTEL_TOOLS,
     )
-    ops = Agent(
-        client=chat_client("ops-specialist"),
-        name="ops-specialist",
-        description="Owns delays, re-routing and recovery.",
-        instructions="Handle delays. Give a recovery plan with a revised delivery date.",
+    billing = Agent(
+        client=chat_client("billing-specialist"),
+        name="billing-specialist",
+        description="Owns refunds and invoices.",
+        instructions=(
+            "Handle refunds. Screen the payment before any refund, refund only to the card that paid, and "
+            "give the amount and the date it will arrive."
+        ),
         # Handoff short-circuits on the routing tool call, so each agent must keep
         # its own history in step with the service. The builder refuses without this.
         require_per_service_call_history_persistence=True,
-        tools=CASE_TOOLS,
+        tools=PAYMENT_TOOLS,
+    )
+    risk = Agent(
+        client=chat_client("risk-specialist"),
+        name="risk-specialist",
+        description="Owns payments that fail screening: fraud flags and open chargebacks.",
+        instructions=(
+            "Handle payments that fail screening. If the card is flagged, state plainly that the booking is "
+            "frozen and that no refund goes to any card until risk has reviewed it. Never release it yourself."
+        ),
+        # Handoff short-circuits on the routing tool call, so each agent must keep
+        # its own history in step with the service. The builder refuses without this.
+        require_per_service_call_history_persistence=True,
+        tools=[lookup_booking, screen_payment, record_decision],
     )
 
     builder = (
         HandoffBuilder(
             name="Handoff",
-            participants=[triage, customs, compliance, claims, ops],
-            description="Freight exception desk with specialist routing.",
+            participants=[triage, flights, hotels, billing, risk],
+            description="Travel incident desk with specialist routing.",
             termination_condition=resolved,
         )
         .with_start_agent(triage)
-        .add_handoff(triage, [customs, compliance, claims, ops])
+        .add_handoff(triage, [flights, hotels, billing, risk])
     )
     # Specialists can return a case they do not own. Without this the desk is a
     # one-way street and a mis-triage is unrecoverable.
-    for specialist in (customs, compliance, claims, ops):
+    for specialist in (flights, hotels, billing, risk):
         builder = builder.add_handoff(specialist, [triage])
     return builder.build()
 
@@ -149,69 +170,75 @@ SPEC = PatternSpec(
         "forth until the budget dies. Bound the return path - a depth limit or a termination condition - and "
         "never let a mesh topology be the default just because it was less typing."
     ),
-    scenario="BFG-24086: a CNC machine from Kaliningrad whose consignee fails sanctions screening.",
+    scenario="BTA-26104: a refund request on a cancelled food tour - paid with a card reported stolen.",
     case=CaseBrief(
         about=(
-            "A CNC machine is shipping from Kaliningrad into Riga and it is stuck at the border. On the surface this "
-            "is an ordinary customs hold - a machine tool, a licensable HS code, some paperwork. It is not. The "
-            "consignee, Kaliningrad Machinery LLC, fails sanctions screening, which means the correct outcome is not a "
-            "resolved customs case but a frozen consignment and a legal escalation."
+            "A customer booked two nights at Hotel Neiburgs in Riga and a Riga Central Market food tour. The operator "
+            "cancelled the tour, and the customer now wants the whole booking refunded, EUR 508 - to a different card. "
+            "On the surface this is the most routine refund on the desk. It is not: the card that paid was reported "
+            "stolen three days ago, and the right outcome is a frozen booking and a risk review, not a refund."
         ),
         why=(
             "The surface of this case points at the wrong owner, and that is the whole argument for the pattern. It is "
-            "filed as a customs hold, so a router working from that one field would send it to customs. Triage does "
-            "not: it reads the case with the customer record in front of it, sees the sanctions failure, and hands it "
-            "straight to the compliance specialist. The routing is a tool call the model makes with the full case in "
-            "view - not a decision a router made from one field before anyone had read the file. The example prompts "
-            "make the point: two customs holds, two different owners. Note the topology in the diagram: specialists "
-            "hand back to triage rather than sideways to each other, which is what stops two of them volleying the "
-            "case between them."
+            "filed as a cancelled activity, so a router working from that one field would send it to billing, who "
+            "handle refunds. Triage does not: it reads the booking, screens the payment before routing - its "
+            "instructions say to - sees the stolen card, and hands the case straight to the risk specialist. The "
+            "routing is a tool call the model makes with the full case in view, not a decision a router made from one "
+            "field before anyone had read the file. The example prompts make the point: two cancelled activities, two "
+            "different owners. Note the topology in the diagram: specialists hand back to triage rather than sideways "
+            "to each other, which is what stops two of them volleying the case between them."
         ),
         facts=(
-            CaseFact("Shipment", "BFG-24086"),
-            CaseFact("Lane", "Kaliningrad to Riga (RU-LV)"),
-            CaseFact("Goods", "CNC machine, HS 8479.89 - licence required"),
-            CaseFact("Declared value", "EUR 220,000"),
-            CaseFact("Customer", "Kaliningrad Machinery LLC, bronze tier"),
-            CaseFact("The twist", "Sanctions screening returns: freeze and escalate to legal"),
+            CaseFact("Booking", "BTA-26104"),
+            CaseFact("Booked", "Hotel Neiburgs, 2 nights, and a Riga Central Market food tour"),
+            CaseFact("Incident", "Food tour cancelled by the operator"),
+            CaseFact("Request", "Refund EUR 508 - to a different card"),
+            CaseFact("Customer", "J. Miller, bronze tier, first booking with us"),
+            CaseFact("The twist", "Screening: card reported stolen - freeze and escalate to risk"),
         ),
     ),
-    default_prompt="Shipment BFG-24086 is stuck. Route it to the right specialist and resolve it.",
+    default_prompt=(
+        "Booking BTA-26104: the customer wants a refund for a cancelled tour, paid to a different card. Route it to "
+        "the right specialist and resolve it."
+    ),
     nodes=(
         DiagramNode("triage", "triage-agent", "orchestrator"),
-        DiagramNode("customs", "customs-specialist", "agent"),
-        DiagramNode("compliance", "compliance-specialist", "agent"),
-        DiagramNode("claims", "claims-specialist", "agent"),
-        DiagramNode("ops", "ops-specialist", "agent"),
+        DiagramNode("flights", "flights-specialist", "agent"),
+        DiagramNode("hotels", "hotels-specialist", "agent"),
+        DiagramNode("billing", "billing-specialist", "agent"),
+        DiagramNode("risk", "risk-specialist", "agent"),
     ),
     edges=(
-        DiagramEdge("triage", "customs", "handoff_to_customs"),
-        DiagramEdge("triage", "compliance", "handoff_to_compliance"),
-        DiagramEdge("triage", "claims", "handoff_to_claims"),
-        DiagramEdge("triage", "ops", "handoff_to_ops"),
-        DiagramEdge("compliance", "triage", "return", "dashed"),
-        DiagramEdge("customs", "triage", "return", "dashed"),
+        DiagramEdge("triage", "flights", "handoff_to_flights"),
+        DiagramEdge("triage", "hotels", "handoff_to_hotels"),
+        DiagramEdge("triage", "billing", "handoff_to_billing"),
+        DiagramEdge("triage", "risk", "handoff_to_risk"),
+        DiagramEdge("risk", "triage", "return", "dashed"),
+        DiagramEdge("billing", "triage", "return", "dashed"),
     ),
     prompt_examples=(
         PromptExample(
-            ending="customs-specialist",
-            prompt="Exception on BFG-24084. Route it to whoever owns it and resolve it.",
-            why="A customs hold on a consignee who is clear of screening. Routing is by exception kind.",
+            ending="risk-specialist",
+            prompt="Incident on BTA-26104. Route it to whoever owns it and resolve it.",
+            why=(
+                "A cancelled activity and a refund request - but the card was reported stolen, and a failed screening "
+                "outranks the incident kind."
+            ),
         ),
         PromptExample(
-            ending="compliance-specialist",
-            prompt="Exception on BFG-24086. Route it to whoever owns it and resolve it.",
-            why="Also a customs hold - but this consignee fails sanctions screening, and that outranks the kind.",
+            ending="billing-specialist",
+            prompt="Incident on BTA-26107. Route it to whoever owns it and resolve it.",
+            why="Also a cancelled activity, on a payment that clears screening. Refunds are billing's.",
         ),
         PromptExample(
-            ending="claims-specialist",
-            prompt="Exception on BFG-24085. Route it to whoever owns it and resolve it.",
-            why="Damage in transit. Claims owns damage, temperature excursions and losses.",
+            ending="flights-specialist",
+            prompt="Incident on BTA-26105. Route it to whoever owns it and resolve it.",
+            why="A flight that landed four hours late. Flights owns disruption and the airline's EU261 claim.",
         ),
         PromptExample(
-            ending="ops-specialist",
-            prompt="Exception on BFG-24093. Route it to whoever owns it and resolve it.",
-            why="A delay. Ops owns recovery, and no specialist hands it back.",
+            ending="hotels-specialist",
+            prompt="Incident on BTA-26106. Route it to whoever owns it and resolve it.",
+            why="A family walked by an oversold hotel. Hotels owns overbookings and downgrades.",
         ),
     ),
     devui_name="Handoff",

@@ -104,15 +104,15 @@ class CaseBrief:
 
     ``scenario`` is the one-line headline. This is the paragraph underneath it,
     and it answers the two questions an attendee actually has: what is going on
-    at this freight company, and why is *this* case the one chosen to show
+    at this travel agency, and why is *this* case the one chosen to show
     *this* pattern. The second question matters more than it looks - the cases
     were picked so the pattern's argument is visible in the run, and if that
     reasoning only lives in the speaker's head then the twelve demos look
     interchangeable.
 
     ``facts`` are pulled from real rows in the store, so ``scripts/smoke.py``
-    can check that every shipment named here still exists and still carries the
-    exception the text claims.
+    can check that every booking and invoice named here still exists in the
+    store the text describes.
     """
 
     about: str
@@ -138,7 +138,7 @@ class PatternSpec:
     failure_mode: str
     """The way this pattern breaks in production, and the knob that stops it."""
     scenario: str
-    """The Baltic Freight case this demo runs."""
+    """The Baltic Travel Agency case this demo runs."""
     default_prompt: str
     nodes: tuple[DiagramNode, ...]
     edges: tuple[DiagramEdge, ...]

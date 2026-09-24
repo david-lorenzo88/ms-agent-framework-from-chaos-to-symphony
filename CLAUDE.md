@@ -46,14 +46,14 @@ audience-facing copy still matches the store, and whether a resumed checkpoint
 starts where the dead run stopped rather than one stage earlier.
 
 That last one guards prose, which is easy to dismiss until you picture it
-failing: renumber a seed shipment and every pattern still runs, every diagram
-still lights up, and the card on screen confidently describes a consignment
-that does not exist. Nothing else in the repo would notice.
+failing: renumber a seed booking and every pattern still runs, every diagram
+still lights up, and the card on screen confidently describes a booking that
+does not exist. Nothing else in the repo would notice.
 
 ## Offline is not a stand-in for a live model
 
 `ScriptedChatClient` reads the in-memory store directly, so it answers from real
-shipment data an actual model would never have been given. A pattern can pass
+booking data an actual model would never have been given. A pattern can pass
 every offline check and still be broken against Foundry or Azure OpenAI.
 
 Before changing an agent, ask what it could know from the prompt alone. An agent

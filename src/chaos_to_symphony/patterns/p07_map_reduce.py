@@ -1,8 +1,8 @@
 """Pattern 7 - Fan-out / fan-in (map-reduce).
 
-New material this year. Twenty shipments, three scoring dimensions, one ranked
-worklist. The map stage is three plain Python executors and the reduce stage is
-a fourth; only the final narration is an agent.
+New material this year. Sixteen supplier invoices, three checks, one dispute
+list. The map stage is three plain Python executors and the reduce stage is a
+fourth; only the final memo is an agent.
 
 The point on stage: in an agent workflow, most nodes should not be agents. A
 deterministic executor is faster, free, and testable - spend model calls on
@@ -29,96 +29,100 @@ from typing_extensions import Never
 
 from ..base import CaseBrief, CaseFact, DiagramEdge, DiagramNode, PatternSpec
 from ..clients import chat_client
-from ..memory import STORE, Severity
+from ..memory import STORE
 
-TABLE_KEY = "ranked_table"
-_SEVERITY_WEIGHT = {Severity.CRITICAL: 40, Severity.HIGH: 25, Severity.MEDIUM: 12, Severity.LOW: 4}
+TABLE_KEY = "dispute_table"
 
 
 @dataclass
 class Batch:
     """The work handed to every mapper."""
 
-    shipment_ids: list[str]
+    invoice_ids: list[str]
 
 
 @dataclass
-class Scores:
-    """One mapper's contribution: a score per shipment, plus its dimension name."""
+class Findings:
+    """One checker's contribution: EUR over-billed per invoice, plus the check's name."""
 
-    dimension: str
-    by_shipment: dict[str, int] = field(default_factory=dict)
+    check: str
+    by_invoice: dict[str, int] = field(default_factory=dict)
 
 
 @executor(id="dispatch")
 async def dispatch(prompt: str, ctx: WorkflowContext[Batch]) -> None:
-    """Load every open exception and hand the same batch to all three mappers."""
-    ids = [s.id for s in STORE.open_exceptions()]
-    STORE.record("map-reduce:dispatch", "fan-out", f"{len(ids)} shipments", pattern="map-reduce")
+    """Load this month's supplier invoices and hand the same batch to all three checkers."""
+    ids = sorted(STORE.invoices)
+    STORE.record("map-reduce:dispatch", "fan-out", f"{len(ids)} invoices", pattern="map-reduce")
     await ctx.send_message(Batch(ids))
 
 
-class SeverityScorer(Executor):
-    """Map stage 1: score by how bad the exception is."""
+class RateChecker(Executor):
+    """Map stage 1: billed above the contracted rate, on what was actually delivered."""
 
     @handler
-    async def score(self, batch: Batch, ctx: WorkflowContext[Scores]) -> None:
-        out = Scores("severity")
-        for sid in batch.shipment_ids:
-            shipment = STORE.shipments[sid]
-            out.by_shipment[sid] = _SEVERITY_WEIGHT[shipment.severity]
+    async def check(self, batch: Batch, ctx: WorkflowContext[Findings]) -> None:
+        out = Findings("rate")
+        for iid in batch.invoice_ids:
+            inv = STORE.invoices[iid]
+            over = max(0, inv.rate_invoiced_eur - inv.rate_contracted_eur) * inv.qty_delivered
+            if over:
+                out.by_invoice[iid] = over
         await ctx.send_message(out)
 
 
-class ValueScorer(Executor):
-    """Map stage 2: score by money at risk."""
+class QuantityChecker(Executor):
+    """Map stage 2: billed for nights or places that were never delivered."""
 
     @handler
-    async def score(self, batch: Batch, ctx: WorkflowContext[Scores]) -> None:
-        out = Scores("value")
-        for sid in batch.shipment_ids:
-            shipment = STORE.shipments[sid]
-            out.by_shipment[sid] = min(40, shipment.declared_value_eur // 8_000)
+    async def check(self, batch: Batch, ctx: WorkflowContext[Findings]) -> None:
+        out = Findings("quantity")
+        for iid in batch.invoice_ids:
+            inv = STORE.invoices[iid]
+            over = max(0, inv.qty_invoiced - inv.qty_delivered) * inv.rate_invoiced_eur
+            if over:
+                out.by_invoice[iid] = over
         await ctx.send_message(out)
 
 
-class RelationshipScorer(Executor):
-    """Map stage 3: score by how much the customer is worth to us."""
+class CommissionChecker(Executor):
+    """Map stage 3: commission deducted at less than the agreed percentage."""
 
     @handler
-    async def score(self, batch: Batch, ctx: WorkflowContext[Scores]) -> None:
-        tier_points = {"gold": 20, "silver": 10, "bronze": 3}
-        out = Scores("relationship")
-        for sid in batch.shipment_ids:
-            shipment = STORE.shipments[sid]
-            customer = STORE.customers.get(shipment.customer_id)
-            out.by_shipment[sid] = tier_points.get(customer.tier, 0) if customer else 0
+    async def check(self, batch: Batch, ctx: WorkflowContext[Findings]) -> None:
+        out = Findings("commission")
+        for iid in batch.invoice_ids:
+            inv = STORE.invoices[iid]
+            gross = inv.qty_delivered * inv.rate_contracted_eur
+            short = max(0, inv.commission_contracted_pct - inv.commission_invoiced_pct) * gross // 100
+            if short:
+                out.by_invoice[iid] = short
         await ctx.send_message(out)
 
 
 class Reducer(Executor):
-    """Reduce stage: sum the three dimensions and rank."""
+    """Reduce stage: sum the three checks per invoice and rank what to dispute."""
 
     @handler
-    async def reduce(self, results: list[Scores], ctx: WorkflowContext[AgentExecutorRequest]) -> None:
+    async def reduce(self, results: list[Findings], ctx: WorkflowContext[AgentExecutorRequest]) -> None:
         totals: dict[str, int] = {}
+        detail: dict[str, list[str]] = {}
         for result in results:
-            for sid, points in result.by_shipment.items():
-                totals[sid] = totals.get(sid, 0) + points
+            for iid, amount in result.by_invoice.items():
+                totals[iid] = totals.get(iid, 0) + amount
+                detail.setdefault(iid, []).append(f"{result.check} EUR {amount:,}")
 
-        ranked = sorted(totals.items(), key=lambda kv: -kv[1])[:5]
-        STORE.record("map-reduce:reduce", "fan-in", f"{len(results)} dimensions", pattern="map-reduce")
+        ranked = sorted(totals.items(), key=lambda kv: -kv[1])
+        STORE.record("map-reduce:reduce", "fan-in", f"{len(results)} checks", pattern="map-reduce")
 
         lines = []
-        for rank, (sid, score) in enumerate(ranked, start=1):
-            shipment = STORE.shipments[sid]
-            customer = STORE.customers.get(shipment.customer_id)
+        for rank, (iid, amount) in enumerate(ranked, start=1):
+            inv = STORE.invoices[iid]
             lines.append(
-                f"{rank}. {sid} score {score} - {shipment.goods} on {shipment.lane}, "
-                f"{shipment.severity.value}, EUR {shipment.declared_value_eur:,}, "
-                f"{customer.name if customer else '?'} ({customer.tier if customer else '?'})"
+                f"{rank}. {iid} EUR {amount:,} - {inv.supplier}, {inv.booking_id}: {', '.join(detail[iid])}"
             )
-        table = "\n".join(lines)
+        total = sum(totals.values())
+        table = "\n".join(lines) + f"\nTOTAL EUR {total:,} across {len(ranked)} invoices."
         ctx.set_state(TABLE_KEY, table)
         await ctx.send_message(
             AgentExecutorRequest(
@@ -126,8 +130,8 @@ class Reducer(Executor):
                     Message(
                         "user",
                         contents=[
-                            "Here is today's ranked exception worklist, scored on severity, value and "
-                            f"relationship:\n{table}\n\nWrite the two-sentence stand-up summary for the desk."
+                            "Here is this month's supplier invoice reconciliation, checked on rate, quantity and "
+                            f"commission:\n{table}\n\nWrite the two-sentence memo to the finance lead."
                         ],
                     )
                 ],
@@ -138,31 +142,34 @@ class Reducer(Executor):
 
 @executor(id="publish")
 async def publish(response: AgentExecutorResponse, ctx: WorkflowContext[Never, str]) -> None:
-    """Terminal: emit the ranked table together with its narration."""
+    """Terminal: emit the dispute list together with the memo."""
     table = ctx.get_state(TABLE_KEY) or ""
-    await ctx.yield_output(f"TODAY'S WORKLIST\n{table}\n\nStand-up summary: {response.agent_response.text}")
+    await ctx.yield_output(f"DISPUTE LIST\n{table}\n\nMemo to finance: {response.agent_response.text}")
 
 
 def build():
-    """dispatch -> 3 scorers in parallel -> reducer -> narrator."""
-    severity = SeverityScorer(id="severity-scorer")
-    value = ValueScorer(id="value-scorer")
-    relationship = RelationshipScorer(id="relationship-scorer")
+    """dispatch -> 3 checkers in parallel -> reducer -> memo."""
+    rate = RateChecker(id="rate-checker")
+    quantity = QuantityChecker(id="quantity-checker")
+    commission = CommissionChecker(id="commission-checker")
     reducer = Reducer(id="reducer")
     narrator = AgentExecutor(
         Agent(
             client=chat_client("summariser-agent"),
             name="summariser-agent",
-            description="Narrates the ranked worklist for the morning stand-up.",
-            instructions="Summarise the ranked worklist in two sentences. Lead with the single worst case.",
+            description="Writes the dispute memo for the finance lead.",
+            instructions=(
+                "Write a two-sentence memo to the finance lead: how many invoices to dispute and for how much "
+                "in total, then the largest one and why."
+            ),
         ),
         id="summariser-agent",
     )
 
     return (
         WorkflowBuilder(start_executor=dispatch, name="MapReduce")
-        .add_fan_out_edges(dispatch, [severity, value, relationship])
-        .add_fan_in_edges([severity, value, relationship], reducer)
+        .add_fan_out_edges(dispatch, [rate, quantity, commission])
+        .add_fan_in_edges([rate, quantity, commission], reducer)
         .add_edge(reducer, narrator)
         .add_edge(narrator, publish)
         .build()
@@ -201,46 +208,49 @@ SPEC = PatternSpec(
         "latency and a mapper that throws can strand the join. Give mappers timeouts and make the reducer "
         "explicit about a short result list rather than assuming all N arrived."
     ),
-    scenario="Sixteen open exceptions this morning. Which five does the desk work first?",
+    scenario="Month-end: sixteen supplier invoices against what we actually booked. Which do we dispute?",
     case=CaseBrief(
         about=(
-            "It is Monday morning. Sixteen shipments on the book are carrying an unresolved exception and the desk "
-            "cannot work sixteen. Somebody has to score every open case on the same criteria and hand the team a "
-            "ranked worklist - the five that matter most, in order, with the reason each one is there."
+            "It is the last week of September, and sixteen supplier invoices are waiting to be paid - hotels in seven "
+            "countries, and GetYourGuide for the activities. Most are right. Some are not: a rate above the contract, "
+            "nights billed for a family the hotel walked to another hotel, a commission deducted at the wrong "
+            "percentage. Finance needs the list of invoices to dispute, with the amount on each, before anything is "
+            "paid."
         ),
         why=(
-            "This is a collection, not a case, and that changes the shape of the graph: one source fans a message out "
-            "to three scorers, and a fan-in joins their results into a single list for one reducer. The thing to "
-            "point at is the node count. Only one agent appears in this entire pattern, the summariser at the end. "
-            "Every mapper is ordinary Python, because adding a severity weight, a value band and a tier bonus is "
-            "arithmetic, and arithmetic does not need a language model. Contrast it with Concurrent, two patterns "
-            "back: that fans agents over one input, this fans work over a collection."
+            "This is a collection, not a case, and that changes the shape of the graph: one source fans the invoices "
+            "out to three checkers, and a fan-in joins their findings into a single list for one reducer. The thing to "
+            "point at is the node count. Only one agent appears in this entire pattern, the one that writes the memo "
+            "at the end. Every checker is ordinary Python - rate against the contract, nights and places against what "
+            "was delivered, commission against the agreed percentage - because comparing two numbers is arithmetic, "
+            "and arithmetic does not need a language model. Contrast it with Concurrent, five patterns back: that fans "
+            "agents over one input, this fans work over a collection."
         ),
         facts=(
-            CaseFact("Scope", "Every open exception on the book"),
-            CaseFact("Open exceptions", "16 of 20 shipments"),
-            CaseFact("Scored on", "Severity, declared value, customer tier - three scorers, summed"),
-            CaseFact("Output", "The ranked five the desk works first"),
+            CaseFact("Scope", "Every supplier invoice for September"),
+            CaseFact("Invoices", "16, from hotels and GetYourGuide"),
+            CaseFact("Checked on", "Rate, quantity, commission - three checkers, summed"),
+            CaseFact("Output", "The invoices to dispute, largest first"),
             CaseFact("Agents involved", "One - the rest is Python"),
         ),
     ),
-    default_prompt="Build today's ranked exception worklist for the Baltic desk.",
+    default_prompt="Reconcile this month's supplier invoices and tell finance which ones to dispute.",
     nodes=(
         DiagramNode("disp", "dispatch", "executor"),
-        DiagramNode("sev", "severity-scorer", "executor"),
-        DiagramNode("val", "value-scorer", "executor"),
-        DiagramNode("rel", "relationship-scorer", "executor"),
+        DiagramNode("rate", "rate-checker", "executor"),
+        DiagramNode("qty", "quantity-checker", "executor"),
+        DiagramNode("comm", "commission-checker", "executor"),
         DiagramNode("red", "reducer", "executor"),
         DiagramNode("nar", "summariser-agent", "agent"),
     ),
     edges=(
-        DiagramEdge("disp", "sev", "map"),
-        DiagramEdge("disp", "val", "map"),
-        DiagramEdge("disp", "rel", "map"),
-        DiagramEdge("sev", "red", "reduce"),
-        DiagramEdge("val", "red", "reduce"),
-        DiagramEdge("rel", "red", "reduce"),
-        DiagramEdge("red", "nar", "ranked list"),
+        DiagramEdge("disp", "rate", "map"),
+        DiagramEdge("disp", "qty", "map"),
+        DiagramEdge("disp", "comm", "map"),
+        DiagramEdge("rate", "red", "reduce"),
+        DiagramEdge("qty", "red", "reduce"),
+        DiagramEdge("comm", "red", "reduce"),
+        DiagramEdge("red", "nar", "dispute list"),
     ),
     devui_name="MapReduce",
     build=build,

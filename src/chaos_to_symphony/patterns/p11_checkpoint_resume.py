@@ -19,7 +19,7 @@ from agent_framework.orchestrations import SequentialBuilder
 from ..base import CaseBrief, CaseFact, DiagramEdge, DiagramNode, PatternSpec
 from ..clients import chat_client
 from ..memory import STORE
-from ..tools import CASE_TOOLS
+from ..tools import INTAKE_TOOLS, PLANNER_TOOLS, estimate_compensation
 
 #: Shared between the original run and the resumed one. In production this is
 #: the only piece that has to outlive the process.
@@ -37,21 +37,27 @@ def _participants() -> list[Agent]:
             client=chat_client("intake-agent"),
             name="intake-agent",
             description="Establishes the facts.",
-            instructions="State the facts of the exception in two sentences.",
-            tools=CASE_TOOLS,
+            instructions="Look the booking up and state the facts of the incident in two sentences.",
+            tools=INTAKE_TOOLS,
         ),
         Agent(
             client=chat_client("pricing-specialist"),
             name="pricing-specialist",
-            description="Prices the exposure.",
-            instructions="Price the exposure against the customer's SLA band.",
-            tools=CASE_TOOLS,
+            description="Moves and prices everything that depended on the flight.",
+            instructions=(
+                "Move the hotel nights and activities that depended on the cancelled flight, check the "
+                "flight against EU261, and price what the change costs us against the customer's tier."
+            ),
+            tools=[*PLANNER_TOOLS, estimate_compensation],
         ),
         Agent(
             client=chat_client("writer-agent"),
             name="writer-agent",
             description="Writes the letter.",
-            instructions="Write the customer letter conveying the outcome.",
+            instructions=(
+                "Write the letter to the travellers conveying the new plan. Put a date on every commitment and "
+                "say who owes any compensation."
+            ),
         ),
     ]
 
@@ -169,31 +175,35 @@ SPEC = PatternSpec(
         "workflow state - and remember a checkpoint is a copy of your data, subject to the same retention "
         "rules as everything else."
     ),
-    scenario="A three-stage claim pipeline, interrupted after stage one by a pod restart.",
+    scenario="BTA-26109: a school group's rebooking to Rome, interrupted after stage one by a pod restart.",
     case=CaseBrief(
         about=(
-            "A consignment of diagnostic kits reached a Warsaw hospital tender three days late and the consignee has "
-            "invoked a penalty clause. It is an ordinary three-stage claim: get the facts, price the exposure, write "
-            "to the customer. Then, halfway through, the pod running it dies."
+            "An Italian air traffic control strike has cancelled the Mežaparks Secondary School group's flight to Rome "
+            "- 32 students and 4 teachers, rebooked two days later. The rebooking is an ordinary three-stage job: get "
+            "the facts, move and price everything that depended on the flight, write to the parents. Then, halfway "
+            "through, the pod running it dies."
         ),
         why=(
-            "Losing the run would mean re-doing every model call already paid for - and if a human approval were "
+            "Losing the run would mean redoing every model call already paid for - and if a human approval were "
             "sitting in the middle of it, losing their decision too. So this demo proves the recovery the only way "
             "that counts. It does not pause and continue the same object. It throws the first workflow instance away "
             "entirely and builds a brand new one, which finishes the job from the checkpoint alone - and the log names "
-            "the stages it ran, so you can see intake is not one of them. Storage is in memory here; the same "
-            "interface backs file and Cosmos storage."
+            "the stages it ran, so you can see intake is not one of them. In production, stage two is where 36 tickets "
+            "get reissued - which is exactly why replayed side effects are this pattern's failure mode. Storage is in "
+            "memory here; the same interface backs file and Cosmos storage."
         ),
         facts=(
-            CaseFact("Shipment", "BFG-24090"),
-            CaseFact("Lane", "Helsinki to Warsaw (FI-PL)"),
-            CaseFact("What happened", "Three days late into a hospital tender; penalty clause invoked"),
-            CaseFact("Declared value", "EUR 178,000"),
-            CaseFact("Customer", "Helsinki Pharma Oy, gold tier"),
+            CaseFact("Booking", "BTA-26109"),
+            CaseFact("Group", "Mežaparks Secondary School - 32 students, 4 teachers"),
+            CaseFact("Flight", "airBaltic BT633 Riga → Rome, cancelled - Italian ATC strike"),
+            CaseFact("Rebooked", "26 Sep - two nights at Hotel Nord Nuova Roma released"),
+            CaseFact("Colosseum tour", "Moved to 27 Sep"),
             CaseFact("The interruption", "Killed after stage one, resumed in a different instance"),
         ),
     ),
-    default_prompt="Work the exception on shipment BFG-24090 and write the customer letter.",
+    default_prompt=(
+        "Rebook the Mežaparks school group on BTA-26109 after the Rome cancellation and write to the parents."
+    ),
     nodes=(
         DiagramNode("s1", "intake-agent", "agent"),
         DiagramNode("s2", "pricing-specialist", "agent"),
