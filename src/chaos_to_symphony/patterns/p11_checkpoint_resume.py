@@ -71,41 +71,67 @@ async def demo(prompt: str) -> list[str]:
     notes: list[str] = []
     STORE.record("checkpoint:demo", "start", prompt[:60], pattern="checkpoint-resume")
 
-    # --- first run, abandoned deliberately after the first stage ----------
+    # --- first run, abandoned deliberately once stage one is checkpointed --
+    #
+    # Stop on the superstep boundary, not on the stage's own completion event.
+    # The checkpoint that covers a stage is written when its superstep closes,
+    # which is *after* executor_completed fires - so a run killed on
+    # executor_completed resumes from the checkpoint before the stage, and the
+    # new instance quietly runs stage one again. That is this pattern's own
+    # failure mode, replayed side effects, happening unannounced on stage.
+    # The store outlives a single demo - it is the one thing that must - so it
+    # also holds every earlier run's checkpoints, including runs that finished.
+    # Resume from "the latest checkpoint in storage" and a second demo in the
+    # same process resumes the first demo's finished run: the new instance has
+    # nothing left to do and no letter comes out. Only this run's count.
+    before = {c.checkpoint_id for c in await CHECKPOINTS.list_checkpoints(workflow_name=WORKFLOW_NAME)}
+
     first = build()
-    stages = 0
+    stage_one = _participants()[0].name
+    stage_one_done = False
     async for event in first.run(prompt, stream=True):
-        if event.type == "executor_completed":
-            stages += 1
-            if stages >= 2:
-                notes.append(f"Interrupted the run after {stages} executor(s) - simulating a pod restart.")
-                break
+        if event.type == "executor_completed" and getattr(event, "executor_id", "") == stage_one:
+            stage_one_done = True
+        elif event.type == "superstep_completed" and stage_one_done:
+            notes.append(f"Interrupted the run after stage one ({stage_one}) - simulating a pod restart.")
+            break
     del first  # the object is gone; only the checkpoint store survives
 
-    saved = await CHECKPOINTS.list_checkpoints(workflow_name=WORKFLOW_NAME)
+    saved = [
+        c for c in await CHECKPOINTS.list_checkpoints(workflow_name=WORKFLOW_NAME) if c.checkpoint_id not in before
+    ]
     if not saved:
         notes.append("No checkpoint was written - nothing to resume from.")
         return notes
 
     latest = sorted(saved, key=lambda c: (c.iteration_count, c.timestamp))[-1]
-    notes.append(f"{len(saved)} checkpoint(s) in storage. Latest: {str(latest.checkpoint_id)[:18]}.")
+    notes.append(f"{len(saved)} checkpoint(s) written by this run. Latest: {str(latest.checkpoint_id)[:18]}.")
 
     # --- a brand new Workflow object, resuming the old run ----------------
     resumed = build()
     notes.append("Built a NEW workflow instance - it shares only the checkpoint store.")
-    outputs: list[str] = []
+    ran: list[str] = []
+    by_author: dict[str, list[str]] = {}
     async for event in resumed.run(checkpoint_id=latest.checkpoint_id, stream=True):
-        if event.type == "output":
+        if event.type == "executor_invoked":
+            executor_id = getattr(event, "executor_id", "") or ""
+            if executor_id and executor_id not in ran:
+                ran.append(executor_id)
+        elif event.type == "output":
+            author = getattr(event.data, "author_name", None) or "workflow"
             text = getattr(event.data, "text", None) or str(event.data)
-            if text.strip():
-                outputs.append(text.strip())
+            by_author.setdefault(author, []).append(text)
+    notes.append(
+        f"Resumed from the checkpoint and ran to completion: the new instance ran {', '.join(ran) or 'nothing'}"
+        + (f" - {stage_one} did not run again." if stage_one not in ran else f" - and {stage_one} ran AGAIN.")
+    )
     # Streamed output arrives in chunks; join before narrating so the line reads
-    # as one answer rather than as the transport's frame size.
-    joined = " ".join(outputs)
-    notes.append("Resumed from the checkpoint and ran to completion.")
-    if joined:
-        notes.append(f"  -> {joined[:260]}")
-    STORE.record("checkpoint:demo", "resumed", f"{len(outputs)} outputs", pattern="checkpoint-resume")
+    # as one answer rather than as the transport's frame size. Show the stage
+    # the resumed instance finished with - the letter - not the replayed recap.
+    final = "".join(by_author[list(by_author)[-1]]).strip() if by_author else ""
+    if final:
+        notes.append(f"  -> {final[:320]}")
+    STORE.record("checkpoint:demo", "resumed", f"ran {', '.join(ran)}", pattern="checkpoint-resume")
     return notes
 
 
@@ -154,9 +180,9 @@ SPEC = PatternSpec(
             "Losing the run would mean re-doing every model call already paid for - and if a human approval were "
             "sitting in the middle of it, losing their decision too. So this demo proves the recovery the only way "
             "that counts. It does not pause and continue the same object. It throws the first workflow instance away "
-            "entirely and builds a brand new one, which finishes the job from the checkpoint alone. Watch the log for "
-            "the point where the first instance is discarded. Storage is in memory here; the same interface backs file "
-            "and Cosmos storage."
+            "entirely and builds a brand new one, which finishes the job from the checkpoint alone - and the log names "
+            "the stages it ran, so you can see intake is not one of them. Storage is in memory here; the same "
+            "interface backs file and Cosmos storage."
         ),
         facts=(
             CaseFact("Shipment", "BFG-24090"),
@@ -176,11 +202,10 @@ SPEC = PatternSpec(
         DiagramNode("new", "New workflow instance", "executor"),
     ),
     edges=(
-        DiagramEdge("s1", "s2", "stage 1 done"),
-        DiagramEdge("s1", "store", "checkpoint", "dashed"),
-        DiagramEdge("s2", "store", "checkpoint", "dashed"),
+        DiagramEdge("s1", "store", "checkpoint, then killed", "dashed"),
         DiagramEdge("store", "new", "resume by id", "loop"),
-        DiagramEdge("new", "s3", "continues"),
+        DiagramEdge("new", "s2", "continues at stage 2"),
+        DiagramEdge("s2", "s3", ""),
     ),
     devui_name="CheckpointResume",
     build=build,

@@ -3,13 +3,14 @@
 Usage:  python scripts/smoke.py [slug ...]
 
 Exits non-zero if any pattern fails, so CI and a pre-session sanity check are
-the same command. It also checks five claims that nothing else would catch:
+the same command. It also checks six claims that nothing else would catch:
 what DevUI would ask for before running a pattern (see
 ``chaos_to_symphony.devui_input``), whether each branching pattern's example
 prompts still reach the endings they advertise, whether the Agents panel can
 still read every agent's prompt and tools out of the built workflow, whether
-the group chat can still be ended early by a talkative chair, and whether the
-briefing copy the audience reads still matches the store it describes.
+the group chat can still be ended early by a talkative chair, whether the
+briefing copy the audience reads still matches the store it describes, and
+whether a resumed checkpoint re-runs work it had already finished.
 """
 
 from __future__ import annotations
@@ -297,6 +298,33 @@ def check_case_briefs(specs) -> int:
     return failures
 
 
+async def check_checkpoint_resume() -> int:
+    """The resumed instance picks up at stage two - it does not run stage one again.
+
+    The run is killed once stage one is checkpointed, and a new instance
+    resumes. Kill it on the stage's own completion event instead and the
+    checkpoint that covers it has not been written yet, so the new instance
+    quietly re-runs stage one - the replayed side effect this pattern warns
+    about, happening on stage. Nothing else notices: the demo still finishes and
+    still prints a letter, so only a check on *what ran* catches it.
+    """
+    from chaos_to_symphony.patterns import p11_checkpoint_resume as p11
+
+    stages = [agent.name for agent in p11._participants()]
+    # Twice, because the store outlives a run: a second demo in the same
+    # process must resume its own run, not the first one's finished checkpoint.
+    for attempt in (1, 2):
+        reset_context()
+        notes = await p11.demo(p11.SPEC.default_prompt)
+        resumed = next((n for n in notes if n.startswith("Resumed from the checkpoint")), "")
+        ran = resumed.split("the new instance ran ", 1)[-1]
+        if stages[0] in ran.split(" - ")[0] or stages[-1] not in ran:
+            print(f"  [FAIL] checkpoint resume, run {attempt}: {resumed or notes[-1:]}")
+            return 1
+    print(f"  Checkpoint:  resumed at stage two, twice in one process - {stages[0]} never re-runs")
+    return 0
+
+
 async def main() -> int:
     wanted = sys.argv[1:]
     specs = [get(s) for s in wanted] if wanted else list(PATTERNS)
@@ -314,6 +342,7 @@ async def main() -> int:
     failures += check_agent_configs(specs)
     failures += check_group_chat_termination()
     failures += check_case_briefs(specs)
+    failures += await check_checkpoint_resume()
     return 1 if failures else 0
 
 
