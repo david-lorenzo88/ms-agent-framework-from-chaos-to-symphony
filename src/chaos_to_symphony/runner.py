@@ -17,6 +17,7 @@ from typing import Any
 
 from . import telemetry
 from .base import PatternSpec
+from .clients import redact
 from .memory import STORE
 from .scripted import SEND_BACK_INSTRUCTION, reset_context
 
@@ -268,7 +269,7 @@ async def execute(session: RunSession) -> None:
         session.traces = telemetry.summarise(spans)
         session.log("info", "runner", f"run complete - {len(session.traces)} spans captured")
     except Exception as exc:
-        session.log("error", "runner", f"{type(exc).__name__}: {exc}")
+        session.log("error", "runner", redact(f"{type(exc).__name__}: {exc}"))
     finally:
         session.emit("traces", rows=session.traces)
         session.emit("audit", rows=STORE.audit_dicts())

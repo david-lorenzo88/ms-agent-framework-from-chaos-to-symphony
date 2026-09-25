@@ -33,6 +33,7 @@ const state = {
   nodes: new Map(),  // diagram node id -> <g>
   approvalTimer: null,
   domain: null,     // the briefing, fetched once and kept
+  site: null,       // the site's own provider, from /api/patterns and /api/config
 };
 
 /* ── boot ─────────────────────────────────────────────────────── */
@@ -443,10 +444,12 @@ async function run() {
   const response = await fetch('/api/run/' + state.current.slug, {
     method: 'POST',
     headers: { 'Content-Type': 'application/json' },
-    body: JSON.stringify({ prompt: $('prompt').value }),
+    body: JSON.stringify({ prompt: $('prompt').value, foundry: myFoundry() }),
   });
   if (!response.ok) {
-    logLine('error', 'ui', 'could not start the run');
+    const detail = (await response.json().catch(() => ({}))).detail;
+    logLine('error', 'ui', 'could not start the run' + (typeof detail === 'string' ? `: ${detail}` : ''));
+    setRunState('idle');
     $('runBtn').disabled = false;
     return;
   }
@@ -857,6 +860,58 @@ function setRunState(text) {
 
 /* ── provider settings ────────────────────────────────────────── */
 
+/*
+ * Two providers can be in play: the one this site was deployed with, and a
+ * Foundry project the visitor brought themselves. The site's is described but
+ * never shown - its endpoint names the host's Azure resource. The visitor's
+ * lives in this browser only and is sent with each of their runs; the server
+ * keeps none of it, so one visitor's settings cannot reach another's runs.
+ *
+ * Endpoint and deployment survive a reload; the token only lasts as long as
+ * the tab, which is roughly as long as it is valid anyway.
+ */
+const MINE_KEY = 'chaos.foundry';
+const TOKEN_KEY = 'chaos.foundry.token';
+
+/** The visitor's own Foundry project, or null if they have not given one. */
+function myFoundry() {
+  try {
+    const saved = JSON.parse(localStorage.getItem(MINE_KEY) || 'null');
+    const token = sessionStorage.getItem(TOKEN_KEY) || '';
+    if (saved && saved.endpoint && saved.model && token) return { ...saved, token };
+  } catch { /* storage blocked: behave as if nothing was saved */ }
+  return null;
+}
+
+function rememberMine(mine) {
+  try {
+    localStorage.setItem(MINE_KEY, JSON.stringify({ endpoint: mine.endpoint, model: mine.model }));
+    sessionStorage.setItem(TOKEN_KEY, mine.token);
+  } catch { /* still used for this page load via the form */ }
+}
+
+function forgetMine() {
+  try {
+    localStorage.removeItem(MINE_KEY);
+    sessionStorage.removeItem(TOKEN_KEY);
+  } catch { /* nothing to forget */ }
+}
+
+/** When a pasted token expires, read from the token itself. null if unreadable. */
+function tokenExpiry(token) {
+  try {
+    const payload = token.split('.')[1].replace(/-/g, '+').replace(/_/g, '/');
+    return JSON.parse(atob(payload)).exp * 1000;
+  } catch {
+    return null;
+  }
+}
+
+/** Hostname only, for labels: enough to recognise, short enough for a pill. */
+function hostOf(endpoint) {
+  try { return new URL(endpoint).hostname.split('.')[0]; } catch { return endpoint; }
+}
+
 /**
  * The badge that says what the demos are really running against.
  *
@@ -865,38 +920,57 @@ function setRunState(text) {
  * which is the failure this whole panel exists to make visible.
  */
 function paintProviderPill(status) {
+  if (status) state.site = status;
+  const site = state.site || {};
   const pill = $('providerPill');
   pill.classList.remove('pill-warn', 'pill-offline', 'pill-live');
-  if (status.note || status.providerNote) {
-    pill.textContent = `${status.requestedProvider} unavailable · offline`;
+
+  const mine = myFoundry();
+  if (mine) {
+    const expires = tokenExpiry(mine.token);
+    if (expires && expires < Date.now()) {
+      pill.textContent = 'your token expired';
+      pill.classList.add('pill-warn');
+      pill.title = 'Fetch a new access token in Settings, or stop using your project there.';
+    } else {
+      pill.textContent = `live · your foundry · ${mine.model}`;
+      pill.classList.add('pill-live');
+      pill.title = `Your runs call ${mine.model} in ${hostOf(mine.endpoint)}.`;
+    }
+  } else if (site.note || site.providerNote) {
+    pill.textContent = `${site.requestedProvider} unavailable · offline`;
     pill.classList.add('pill-warn');
-    pill.title = status.note || status.providerNote;
-  } else if (status.offline) {
+    pill.title = site.note || site.providerNote;
+  } else if (site.offline) {
     pill.textContent = 'offline · no keys needed';
     pill.classList.add('pill-offline');
-    pill.title = 'Agents run against a deterministic scripted client. No model is called.';
+    pill.title = 'Agents run against a deterministic scripted client. No model is called. ' +
+                 'Open Settings to use your own Foundry project.';
   } else {
-    pill.textContent = `live · ${status.provider}`;
+    pill.textContent = `live · ${site.provider}`;
     pill.classList.add('pill-live');
-    pill.title = 'Agents are calling a real model.';
+    pill.title = 'Agents are calling a real model configured by the host of this site.';
   }
 }
 
 function wireSettings() {
   $('settingsBtn').addEventListener('click', openSettings);
   $('cfgClose').addEventListener('click', () => { $('settingsModal').hidden = true; });
-  $('cfgProvider').addEventListener('change', () => {
-    $('foundryFields').hidden = $('cfgProvider').value !== 'foundry';
-  });
   $('settingsForm').addEventListener('submit', (event) => {
     event.preventDefault();
-    sendSettings('PUT', {
-      provider: $('cfgProvider').value,
-      foundryProjectEndpoint: $('cfgEndpoint').value,
-      foundryModel: $('cfgModel').value,
+    useMine({
+      endpoint: $('cfgEndpoint').value.trim(),
+      model: $('cfgModel').value.trim(),
+      token: $('cfgToken').value.trim(),
     });
   });
-  $('cfgReset').addEventListener('click', () => sendSettings('DELETE', null));
+  $('cfgReset').addEventListener('click', () => {
+    forgetMine();
+    $('cfgToken').value = '';
+    $('settingsError').hidden = true;
+    paintProviderPill();
+    paintSettings();
+  });
   document.addEventListener('keydown', (event) => {
     if (event.key === 'Escape' && !$('settingsModal').hidden) $('settingsModal').hidden = true;
   });
@@ -905,79 +979,77 @@ function wireSettings() {
 async function openSettings() {
   $('settingsError').hidden = true;
   $('settingsModal').hidden = false;
+
+  // Only ever the visitor's own values: the site's are not sent to the browser.
+  const mine = myFoundry();
+  let saved = null;
+  try { saved = JSON.parse(localStorage.getItem(MINE_KEY) || 'null'); } catch { /* none */ }
+  $('cfgEndpoint').value = (mine || saved || {}).endpoint || '';
+  $('cfgModel').value = (mine || saved || {}).model || '';
+  $('cfgToken').value = mine ? mine.token : '';
+  paintSettings();
+
   try {
-    paintSettings(await (await fetch('/api/config')).json());
+    const data = await (await fetch('/api/config')).json();
+    state.site = { ...(state.site || {}), ...(data.status || {}) };
+    paintSettings();
   } catch (err) {
-    showSettingsError(`Could not read the settings (${err.message}).`);
+    showSettingsError(`Could not read the site's provider (${err.message}).`);
   }
 }
 
-function paintSettings(data) {
-  const values = data.values || {};
-  const provider = (values.CHAOS_PROVIDER || 'offline').toLowerCase();
-  const selectable = data.selectableProviders || [];
-
-  $('cfgProvider').value = selectable.includes(provider) ? provider : 'offline';
-  $('cfgEndpoint').value = values.FOUNDRY_PROJECT_ENDPOINT || '';
-  $('cfgModel').value = values.FOUNDRY_MODEL || '';
-  $('foundryFields').hidden = $('cfgProvider').value !== 'foundry';
-
-  const status = data.status || {};
+function paintSettings(message) {
   const box = $('settingsStatus');
   box.classList.remove('is-live', 'is-warn');
-  if (status.note) {
-    box.classList.add('is-warn');
-    box.textContent = status.note;
-  } else if (status.offline) {
-    box.textContent = `Running offline on ${status.client}. No model is called.`;
+
+  const mine = myFoundry();
+  const site = state.site || {};
+  const siteLine = site.note
+    ? `This site's own provider is unavailable, so it runs offline.`
+    : site.offline
+      ? 'This site runs offline: a scripted client, no model called.'
+      : 'This site runs a live model configured by its host.';
+
+  if (mine) {
+    const expires = tokenExpiry(mine.token);
+    if (expires && expires < Date.now()) {
+      box.classList.add('is-warn');
+      box.textContent = 'Your access token has expired — fetch a new one and test again.';
+    } else {
+      box.classList.add('is-live');
+      box.textContent = message || (`Your runs use ${mine.model} in ${hostOf(mine.endpoint)}` +
+        (expires ? `, until your token expires at ${new Date(expires).toLocaleTimeString()}.` : '.'));
+    }
   } else {
-    box.classList.add('is-live');
-    box.textContent = `Live on ${status.provider} via ${status.client}` +
-      (status.baseUrl ? ` — ${status.baseUrl}` : '') + '.';
+    box.textContent = `${siteLine} Fill this in to run against your own project instead.`;
   }
 
-  // Say where each value came from, so "why is it still offline" is answerable
-  // without reading the deploy script.
-  const sources = data.sources || {};
-  const saved = Object.values(sources).some((s) => s === 'saved');
-  const parts = [];
-  parts.push(saved
-    ? `Saved settings are in use, from ${data.configPath}.`
-    : `No saved settings — these values come from the environment the app was started with.`);
-  if (!data.writable) parts.push('Read-only here (CHAOS_CONFIG_API=0).');
-  parts.push('Patterns pick this up on their next run. DevUI builds its workflows at start-up, ' +
-             'so restart it to change what it uses.');
-  $('settingsFoot').textContent = parts.join(' ');
-
-  const disabled = data.writable === false;
-  $('cfgSave').disabled = disabled;
-  $('cfgReset').disabled = disabled;
+  $('settingsFoot').textContent = 'Applies to the runs you start from this page. ' +
+    'The embedded DevUI is a separate process and always uses the site’s own provider.';
 }
 
-async function sendSettings(method, body) {
+async function useMine(mine) {
   $('settingsError').hidden = true;
   $('cfgSave').disabled = true;
+  $('cfgSave').textContent = 'Testing…';
   try {
-    const response = await fetch('/api/config', {
-      method,
-      headers: body ? { 'Content-Type': 'application/json' } : undefined,
-      body: body ? JSON.stringify(body) : undefined,
+    const response = await fetch('/api/config/check', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify(mine),
     });
     const data = await response.json().catch(() => ({}));
     if (!response.ok) throw new Error(data.detail || `HTTP ${response.status}`);
+    if (!data.ok) throw new Error(`Your project did not answer: ${data.detail}`);
 
-    paintSettings(data);
-    paintProviderPill(data.status || {});
-    if (data.persisted === false) {
-      showSettingsError('Applied for this process, but the settings file could not be written — ' +
-                        'it will not survive a restart.');
-    }
-    // The agent cards name the client each agent drives, so they are now stale.
-    if ($('panel-agents').classList.contains('is-on')) loadAgents();
+    rememberMine(mine);
+    paintProviderPill();
+    paintSettings(`Connected — ${mine.model} answered "${data.detail}". Your runs now use it.`);
   } catch (err) {
     showSettingsError(err.message);
   } finally {
     $('cfgSave').disabled = false;
+    $('cfgSave').textContent = 'Test & use';
   }
 }
 

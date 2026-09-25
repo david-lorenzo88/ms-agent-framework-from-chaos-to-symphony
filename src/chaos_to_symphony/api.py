@@ -26,8 +26,8 @@ from fastapi.responses import FileResponse, JSONResponse, StreamingResponse
 from fastapi.staticfiles import StaticFiles
 from pydantic import BaseModel
 
-from . import __version__, runtime_config, telemetry
-from .clients import effective, provider
+from . import __version__, telemetry
+from .clients import VisitorFoundry, check_visitor_endpoint, effective, provider, redact, visitor_foundry
 from .domain import brief as domain_brief
 from .introspect import agents_in
 from .memory import STORE
@@ -105,27 +105,38 @@ async def lifespan(app: FastAPI):
 app = FastAPI(title="From Chaos to Symphony", version=__version__, lifespan=lifespan)
 
 
+class FoundryRequest(BaseModel):
+    """A visitor's own Foundry project. Sent with each run, never stored here."""
+
+    endpoint: str = ""
+    model: str = ""
+    token: str = ""
+
+    def settings(self) -> VisitorFoundry:
+        """Validate and normalise, or raise the 422 the settings panel shows."""
+        endpoint, model = self.endpoint.strip().rstrip("/"), self.model.strip()
+        # Tolerate the "Bearer " prefix people copy out of devtools.
+        token = self.token.strip().removeprefix("Bearer ").strip()
+        if not endpoint or not model or not token:
+            raise HTTPException(
+                status_code=422,
+                detail="Your own Foundry project needs all three: project endpoint, model deployment and access token.",
+            )
+        problem = check_visitor_endpoint(endpoint)
+        if problem:
+            raise HTTPException(status_code=422, detail=problem)
+        return VisitorFoundry(endpoint=endpoint, model=model, token=token)
+
+
 class RunRequest(BaseModel):
     prompt: str | None = None
+    #: Absent means "whatever this site runs on".
+    foundry: FoundryRequest | None = None
 
 
 class ApprovalRequest(BaseModel):
     requestId: str
     decision: str = "approve"
-
-
-class ConfigRequest(BaseModel):
-    """What the settings panel sends. No keys: Foundry does not take one."""
-
-    provider: str = "offline"
-    foundryProjectEndpoint: str = ""
-    foundryModel: str = ""
-
-
-#: Set CHAOS_CONFIG_API=0 to make the settings panel read-only. Worth doing on
-#: a public deploy: the site has no authentication, so anyone who finds the URL
-#: can otherwise point the demo at a different Foundry project.
-CONFIG_WRITABLE = os.getenv("CHAOS_CONFIG_API", "1") == "1"
 
 
 # --------------------------------------------------------------------------
@@ -194,89 +205,54 @@ async def audit() -> dict[str, Any]:
 
 
 def _provider_status() -> dict[str, Any]:
-    """What the app would actually use right now, for the panel to show back."""
+    """What this site runs on, for the settings panel.
+
+    Says *whether* the host configured a model, never *which*: the endpoint
+    names the host's Azure resource and project, and the site is public.
+    """
     status = effective()
     return {
         "provider": status["active"],
         "requestedProvider": status["requested"],
         "offline": not status["live"],
         "client": status["client"],
-        "baseUrl": status.get("baseUrl", ""),
         "note": status["note"],
     }
 
 
 @app.get("/api/config")
 async def read_config() -> dict[str, Any]:
-    """The provider settings, and whether they can be changed from here."""
-    return {**runtime_config.snapshot(), "writable": CONFIG_WRITABLE, "status": _provider_status()}
+    """The site's own provider, without the values that configure it.
 
-
-@app.put("/api/config")
-async def write_config(body: ConfigRequest) -> dict[str, Any]:
-    """Point the demo at a provider without restarting it.
-
-    Validates before saving, because the failure this replaces is precisely the
-    silent one: set a provider with no endpoint and every agent quietly runs
-    scripted while the badge says otherwise. The reply carries the *effective*
-    status rather than an acknowledgement, so the panel can say whether the
-    change actually took.
+    There is deliberately no way to change it from here: the site has no
+    authentication, so a setting one visitor saved would be what every other
+    visitor ran against. A visitor's own Foundry project travels with their
+    runs instead - see ``FoundryRequest``.
     """
-    if not CONFIG_WRITABLE:
-        raise HTTPException(status_code=403, detail="Settings are read-only here (CHAOS_CONFIG_API=0).")
-
-    name = body.provider.strip().lower()
-    if name not in runtime_config.SELECTABLE_PROVIDERS:
-        raise HTTPException(
-            status_code=422,
-            detail=f"Provider must be one of: {', '.join(runtime_config.SELECTABLE_PROVIDERS)}.",
-        )
-
-    values = {"CHAOS_PROVIDER": name}
-    if name == "foundry":
-        endpoint = body.foundryProjectEndpoint.strip()
-        model = body.foundryModel.strip()
-        if not endpoint or not model:
-            raise HTTPException(
-                status_code=422,
-                detail="Foundry needs both a project endpoint and a model deployment name.",
-            )
-        if not endpoint.startswith("https://"):
-            raise HTTPException(
-                status_code=422,
-                detail="The project endpoint should start with https:// - copy it from the Foundry portal.",
-            )
-        values["FOUNDRY_PROJECT_ENDPOINT"] = endpoint
-        values["FOUNDRY_MODEL"] = model
-
-    persisted = runtime_config.save(values)
-    return {
-        **runtime_config.snapshot(),
-        "writable": True,
-        "persisted": persisted,
-        "status": _provider_status(),
-    }
+    return {"status": _provider_status(), "foundryHostSuffix": ".services.ai.azure.com"}
 
 
-@app.delete("/api/config")
-async def reset_config() -> dict[str, Any]:
-    """Forget the saved settings and use whatever the process was started with."""
-    if not CONFIG_WRITABLE:
-        raise HTTPException(status_code=403, detail="Settings are read-only here (CHAOS_CONFIG_API=0).")
-    runtime_config.clear()
-    return {**runtime_config.snapshot(), "writable": True, "status": _provider_status()}
+@app.post("/api/config/check")
+async def check_config(body: FoundryRequest) -> dict[str, Any]:
+    """One tiny request against a visitor's project, so a typo shows up here
+    rather than as a 401 from every agent halfway through a run."""
+    from agent_framework import Agent
+
+    from .clients import chat_client
+
+    with visitor_foundry(body.settings()):
+        try:
+            agent = Agent(client=chat_client("probe"), name="probe", instructions="Reply with the single word: ok")
+            response = await asyncio.wait_for(agent.run("ping"), timeout=45)
+        except Exception as exc:
+            return {"ok": False, "detail": f"{type(exc).__name__}: {exc}"[:400]}
+    return {"ok": True, "detail": (response.text or "").strip()[:60]}
 
 
 #: Built agent configs, per slug. Reading them means building the workflow, and
 #: a pattern's prompts and tools cannot change while the process is running -
 #: so build once and answer every later visit from here.
 _AGENTS: dict[str, list[dict[str, Any]]] = {}
-
-
-@runtime_config.on_change
-def _forget_cached_agents() -> None:
-    """Agent cards name the client each agent drives, so they go stale too."""
-    _AGENTS.clear()
 
 
 @app.get("/api/agents/{slug}")
@@ -300,7 +276,7 @@ async def agents(slug: str) -> dict[str, Any]:
             # A pattern that cannot be built is a problem for its own run, not
             # a reason for this panel to 500.
             logger.exception("Could not introspect the agents in %s", slug)
-            raise HTTPException(status_code=503, detail=f"Could not build {slug}: {exc}") from None
+            raise HTTPException(status_code=503, detail=redact(f"Could not build {slug}: {exc}")) from None
 
     return {"slug": slug, "pattern": spec.name, "agents": _AGENTS[slug]}
 
@@ -340,10 +316,15 @@ async def start_run(slug: str, body: RunRequest) -> dict[str, str]:
     except KeyError as exc:
         raise HTTPException(status_code=404, detail=str(exc)) from None
 
+    visitor = body.foundry.settings() if body.foundry else None
+
     run_id = uuid.uuid4().hex[:12]
     session = RunSession(run_id=run_id, spec=spec, prompt=(body.prompt or spec.default_prompt).strip())
     SESSIONS[run_id] = session
-    session.task = asyncio.create_task(execute(session))
+    # The task copies the context it is created in, so the visitor's project
+    # applies to every agent this run builds and to no other run.
+    with visitor_foundry(visitor):
+        session.task = asyncio.create_task(execute(session))
 
     # Keep only the last handful of runs; this is a demo, not a log server.
     for old in list(SESSIONS)[:-8]:

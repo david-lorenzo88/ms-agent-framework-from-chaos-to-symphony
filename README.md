@@ -427,7 +427,6 @@ src/chaos_to_symphony/
   devui_app.py    registers all twelve workflows with DevUI
   devui_input.py  makes DevUI ask for a prompt, not a Message form
   introspect.py   reads each agent's prompt and tools off the built workflow
-  runtime_config.py  provider settings the site can change, saved to a file
   patterns/       one module per pattern, p01…p12
 web/              the showcase site: no framework, no CDN, no build step
 deck/             the session deck and the script that builds it
@@ -647,36 +646,51 @@ The app therefore serves `/`, `/app.js` and `/styles.css` with
 ordinary reload is enough to pick up a redeploy. If you are looking at an older
 deploy that predates this, one hard refresh (Ctrl/Cmd+Shift+R) clears it.
 
-### Setting the provider from the site
+### Bringing your own Foundry project
 
-**Settings**, top right. Pick `offline` or `foundry`, paste your project
-endpoint and model deployment, save. The patterns pick it up on their next run
-— no restart, no redeploy, no environment variables. It is written to a file on
-the server (`.chaos-config.json`, or wherever `CHAOS_CONFIG_FILE` points), so it
-survives a restart, and *Reset to environment* deletes that file and hands
-control back to whatever the process was started with.
+**Settings**, top right. Paste your project endpoint, your model deployment and
+an access token, then **Test & use**: the site makes one tiny request to prove
+all three are right, and from then on the runs *you* start call your model.
 
-The panel reports the **effective** provider rather than the configured one, so
-the failure this repo keeps hitting — a provider set with no endpoint, silently
-running scripted while the badge claims a model — shows up as a sentence
-instead of as a confusing demo.
+```bash
+az account get-access-token --resource https://ai.azure.com --query accessToken -o tsv
+```
 
-Three things it deliberately does not do:
+Your account needs the **Azure AI User** role on the project — the same role
+the deployed app's identity needs on its own.
 
-- **No API keys.** Only `offline` and `foundry` are selectable, because Foundry
-  authenticates with `DefaultAzureCredential` and needs no secret. Azure OpenAI
-  and OpenAI stay environment-only: a key typed into an unauthenticated public
-  page is a key leaked.
+This is built for a public deploy, so it is deliberately narrow:
+
+- **The site's own settings are never shown.** The panel says whether the host
+  configured a live model, not which endpoint or deployment. `/api/config`,
+  `/api/patterns` and `/api/health` carry no endpoint, and a failing run has
+  the host's endpoint scrubbed from the error it prints.
+- **Nothing a visitor enters is kept on the server.** Endpoint and deployment
+  sit in the browser's `localStorage`, the token in `sessionStorage` (gone with
+  the tab), and all three travel with each run. The server holds them for the
+  length of that run, in a context variable, so two visitors never see each
+  other's model.
+- **A token, not a key, and no ambient identity.** A pasted Entra token expires
+  within the hour and can do only what the visitor's own account can. Without
+  one the form refuses, so a visitor can never borrow the site's managed
+  identity — which would otherwise reach any project the host granted it.
+- **Only Foundry project endpoints.** `https://<resource>.services.ai.azure.com/api/projects/<project>`
+  and nothing else, so the form cannot make the server call an arbitrary URL.
 - **It does not reach DevUI.** DevUI builds its twelve workflows at start-up, in
-  its own process, so it keeps the provider it started with until restarted.
-- **It is per replica.** The file is on the container's own disk. `deploy.sh`
-  scales to three replicas under load, and a setting saved through one of them
-  is not seen by the others — fine for a laptop or a single warm replica,
-  not a substitute for deploying with the environment set.
+  its own process, and always uses the site's own provider.
 
-The site has no authentication, so on a public deploy anyone who finds the URL
-can change the provider. `CHAOS_CONFIG_API=0` makes the panel read-only; the
-API then answers 403 and the buttons disable themselves.
+The site's own provider can only be changed by redeploying with different
+environment variables. There is no longer a way to change it from the page:
+with no authentication, a setting one visitor saved would have been what every
+other visitor ran against.
+
+If you keep a deploy public after an event and do not want strangers spending
+your quota — through the patterns *or* the embedded DevUI — redeploy it
+offline and let visitors bring their own:
+
+```bash
+CHAOS_PROVIDER=offline ./infra/deploy.sh
+```
 
 ### Deploying against Foundry
 
