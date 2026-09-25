@@ -9,17 +9,127 @@ care which client it is driving.
 
 from __future__ import annotations
 
+import base64
+import json
 import os
+import time
+from collections.abc import Iterator
+from contextlib import contextmanager
+from contextvars import ContextVar
+from dataclasses import dataclass
 from functools import lru_cache
 from typing import Any
+from urllib.parse import urlparse
 
-from . import runtime_config
 from .scripted import ScriptedChatClient
 
 
+@dataclass(frozen=True)
+class VisitorFoundry:
+    """A Foundry project a visitor brought with them, for their own runs only.
+
+    The public site must not hand its own identity to strangers, so a visitor
+    who wants a live model supplies all three: their project, their deployment,
+    and an Entra access token for it. The token is what makes this safe to
+    offer - it is theirs, it expires within the hour, and it only ever reaches
+    their own project. None of it is stored on the server or echoed back.
+    """
+
+    endpoint: str
+    model: str
+    token: str
+
+
+#: Set for the duration of one visitor's run. A context variable rather than a
+#: global so two visitors never see each other's settings: asyncio copies the
+#: context into the task a run starts, and every agent is built inside it.
+_visitor: ContextVar[VisitorFoundry | None] = ContextVar("chaos_visitor_foundry", default=None)
+
+#: Foundry project endpoints live here. Anything else is refused, so the form
+#: cannot be used to make the server call an arbitrary URL.
+FOUNDRY_HOST_SUFFIX = ".services.ai.azure.com"
+
+
+def check_visitor_endpoint(endpoint: str) -> str:
+    """Return an error to show the visitor, or "" if the endpoint looks right."""
+    parsed = urlparse(endpoint)
+    if parsed.scheme != "https" or not (parsed.hostname or "").endswith(FOUNDRY_HOST_SUFFIX):
+        return (
+            "The project endpoint should look like "
+            f"https://<resource>{FOUNDRY_HOST_SUFFIX}/api/projects/<project> - copy it from the Foundry portal."
+        )
+    if not parsed.path.startswith("/api/projects/"):
+        return "The project endpoint should end in /api/projects/<project> - copy it from the Foundry portal."
+    return ""
+
+
+@contextmanager
+def visitor_foundry(settings: VisitorFoundry | None) -> Iterator[None]:
+    """Use a visitor's Foundry project for whatever is started inside the block."""
+    token = _visitor.set(settings)
+    try:
+        yield
+    finally:
+        _visitor.reset(token)
+
+
+class _PastedToken:
+    """An access token the visitor pasted, presented as an azure-core credential.
+
+    Deliberately cannot refresh: when it expires the run fails with a 401, and
+    the visitor fetches another. Refreshing would mean holding something
+    longer-lived than a one-hour token, which is exactly what this avoids.
+    """
+
+    def __init__(self, token: str) -> None:
+        self._token = token
+        self._expires_on = _jwt_expiry(token)
+
+    def get_token(self, *scopes: str, **kwargs: Any) -> Any:
+        from azure.core.credentials import AccessToken
+
+        return AccessToken(self._token, self._expires_on)
+
+    def get_token_info(self, *scopes: str, options: Any = None) -> Any:
+        from azure.core.credentials import AccessTokenInfo
+
+        return AccessTokenInfo(self._token, self._expires_on)
+
+
+def _jwt_expiry(token: str) -> int:
+    """The token's own expiry, read without verifying it - Foundry does that.
+
+    Falls back to "now plus a few minutes" for anything unreadable, which only
+    decides when azure-core would ask for a new token; Foundry still rejects an
+    invalid one.
+    """
+    try:
+        payload = token.split(".")[1]
+        claims = json.loads(base64.urlsafe_b64decode(payload + "=" * (-len(payload) % 4)))
+        return int(claims["exp"])
+    except Exception:
+        return int(time.time()) + 300
+
+
 def provider() -> str:
-    """The configured provider name, lowercased."""
-    return (runtime_config.value("CHAOS_PROVIDER", "offline") or "offline").strip().lower()
+    """The provider name for the current run, lowercased."""
+    if _visitor.get() is not None:
+        return "foundry"
+    return (os.getenv("CHAOS_PROVIDER", "offline") or "offline").strip().lower()
+
+
+def redact(text: str) -> str:
+    """Remove the host's own Foundry endpoint from a message bound for a browser.
+
+    A failing run reports its exception on screen, and an SDK error can quote
+    the URL it was calling. Visitors' own endpoints are left alone: those are
+    theirs, and seeing them is how they debug a typo.
+    """
+    endpoint = os.getenv("FOUNDRY_PROJECT_ENDPOINT", "").strip()
+    host = urlparse(endpoint).hostname if endpoint else None
+    for secret in filter(None, (endpoint, host)):
+        text = text.replace(secret, "<host endpoint>")
+    return text
 
 
 def is_offline() -> bool:
@@ -51,8 +161,20 @@ def describe_endpoint(client: Any) -> dict[str, str]:
     }
 
 
-@lru_cache(maxsize=1)
 def effective() -> dict[str, Any]:
+    """What the current run will use: the visitor's project if they gave one."""
+    if _visitor.get() is not None:
+        return _effective()
+    return _effective_for_host()
+
+
+@lru_cache(maxsize=1)
+def _effective_for_host() -> dict[str, Any]:
+    """The site's own answer, cached: the environment cannot change under it."""
+    return _effective()
+
+
+def _effective() -> dict[str, Any]:
     """What the app will *actually* use, not what was asked for.
 
     Reporting the configured provider is not the same thing: select ``azure``
@@ -88,18 +210,6 @@ def effective() -> dict[str, Any]:
         "baseUrl": endpoint["baseUrl"],
         "note": note,
     }
-
-
-@runtime_config.on_change
-def _forget_cached_provider() -> None:
-    """Recompute the provider after the settings panel changes it.
-
-    ``effective`` is cached because it builds a client to answer honestly, and
-    ``_warn_once`` exists so a fallback warning does not repeat every call.
-    Both would otherwise keep reporting the provider the app started with.
-    """
-    effective.cache_clear()
-    _warn_once.cache_clear()
 
 
 def chat_client(persona: str = "agent", *, tool_budget: int = 1) -> Any:
@@ -141,8 +251,18 @@ def chat_client(persona: str = "agent", *, tool_budget: int = 1) -> Any:
             _warn_once("CHAOS_PROVIDER=azure but endpoint/deployment are unset; using the offline scripted client.")
 
     elif name == "foundry":
-        endpoint = runtime_config.value("FOUNDRY_PROJECT_ENDPOINT")
-        model = runtime_config.value("FOUNDRY_MODEL")
+        visitor = _visitor.get()
+        if visitor is not None:
+            # Never falls back: a visitor who asked for their own model and got
+            # the scripted one instead would be told nothing true by the run.
+            from agent_framework.foundry import FoundryChatClient
+
+            return FoundryChatClient(
+                project_endpoint=visitor.endpoint, model=visitor.model, credential=_PastedToken(visitor.token)
+            )
+
+        endpoint = os.getenv("FOUNDRY_PROJECT_ENDPOINT")
+        model = os.getenv("FOUNDRY_MODEL")
         if endpoint and model:
             try:
                 from agent_framework.foundry import FoundryChatClient

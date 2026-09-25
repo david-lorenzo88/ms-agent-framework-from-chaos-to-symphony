@@ -227,47 +227,47 @@
   <div class="modal modal-wide" role="dialog" aria-modal="true" aria-labelledby="settingsTitle">
     <h3 id="settingsTitle">Provider settings</h3>
     <p class="modal-sub">
-      Point the demos at your own Foundry project without restarting anything.
-      Saved to a file on the server, so it survives a restart.
+      Run the demos against your own Foundry project. What you enter stays in this
+      browser and travels only with your own runs — it is never saved on the server
+      and never shown to anyone else.
     </p>
 
     <p class="settings-status" id="settingsStatus"></p>
 
     <form id="settingsForm" autocomplete="off">
       <div class="field">
-        <label for="cfgProvider">Provider</label>
-        <select id="cfgProvider">
-          <option value="offline">offline — scripted client, no keys, no network</option>
-          <option value="foundry">foundry — Foundry Agent Service</option>
-        </select>
+        <label for="cfgEndpoint">Project endpoint</label>
+        <input id="cfgEndpoint" type="url" spellcheck="false" required
+               placeholder="https://&lt;resource&gt;.services.ai.azure.com/api/projects/&lt;project&gt;">
+        <p class="field-hint">Foundry portal → your project → Overview.</p>
       </div>
-
-      <div id="foundryFields" hidden>
-        <div class="field">
-          <label for="cfgEndpoint">Project endpoint</label>
-          <input id="cfgEndpoint" type="url" spellcheck="false"
-                 placeholder="https://&lt;resource&gt;.services.ai.azure.com/api/projects/&lt;project&gt;">
-          <p class="field-hint">Foundry portal → your project → Overview.</p>
-        </div>
-        <div class="field">
-          <label for="cfgModel">Model deployment</label>
-          <input id="cfgModel" type="text" spellcheck="false" placeholder="gpt-4o-mini">
-          <p class="field-hint">
-            The <strong>deployment</strong> name, not the model name — the left column of Model deployments.
-          </p>
-        </div>
-        <p class="field-note">
-          No key here: Foundry authenticates with <code>DefaultAzureCredential</code> — your
-          <code>az login</code> locally, the container app's managed identity when deployed. That
-          identity needs a role on the project, or every call fails once this is switched on.
+      <div class="field">
+        <label for="cfgModel">Model deployment</label>
+        <input id="cfgModel" type="text" spellcheck="false" required placeholder="gpt-4o-mini">
+        <p class="field-hint">
+          The <strong>deployment</strong> name, not the model name — the left column of Model deployments.
         </p>
       </div>
+      <div class="field">
+        <label for="cfgToken">Access token</label>
+        <input id="cfgToken" type="password" spellcheck="false" required autocomplete="off"
+               placeholder="eyJ0eXAiOiJKV1Qi…">
+        <p class="field-hint">
+          <code>az account get-access-token --resource https://ai.azure.com --query accessToken -o tsv</code>
+          <br>Your account needs the <strong>Azure AI User</strong> role on the project.
+        </p>
+      </div>
+      <p class="field-note">
+        Why a token and not a key: it expires within the hour, it only works for what your
+        own account can already do, and this site keeps it in this tab only — close the tab
+        and it is gone. No token, no live model: the site never lends visitors its own identity.
+      </p>
 
       <p class="settings-error" id="settingsError" hidden></p>
 
       <div class="modal-actions">
-        <button class="btn btn-primary" type="submit" id="cfgSave">Save</button>
-        <button class="btn" type="button" id="cfgReset">Reset to environment</button>
+        <button class="btn btn-primary" type="submit" id="cfgSave">Test &amp; use</button>
+        <button class="btn" type="button" id="cfgReset">Stop using mine</button>
         <button class="btn" type="button" id="cfgClose">Close</button>
       </div>
     </form>
